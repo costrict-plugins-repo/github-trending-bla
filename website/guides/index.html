@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en" data-seo-page="guides">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://ungh.cc https://raw.githubusercontent.com; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <title>Technical Defense Guides — Electron, WASM, Native Binaries, Python &amp; AI Models | BLA</title>
+    <meta
+      name="description"
+      content="Architecture and hardening guides for BLA (bla-agents): protect Electron ASAR &amp; IPC, WebAssembly, ELF/Mach-O/PE binaries, Python bytecode, SQLite, GGUF/Safetensors models, and Agent-Driven AST Weave."
+    />
+    <meta
+      name="keywords"
+      content="Electron ASAR obfuscation, Electron IPC protection, WebAssembly obfuscation, ELF Mach-O PE binary protection, MBA obfuscation, AST weave, GGUF Safetensors protection, Python pyc protection"
+    />
+    <meta name="author" content="BLA Contributors" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="theme-color" content="#040814" />
+    <link rel="canonical" href="https://bla.tools/guides/" />
+    <link rel="alternate" hreflang="en" href="https://bla.tools/guides/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://bla.tools/guides/?lang=zh-CN" />
+    <link rel="alternate" hreflang="zh-TW" href="https://bla.tools/guides/?lang=zh-TW" />
+    <link rel="alternate" hreflang="ja" href="https://bla.tools/guides/?lang=ja" />
+    <link rel="alternate" hreflang="ko" href="https://bla.tools/guides/?lang=ko" />
+    <link rel="alternate" hreflang="es" href="https://bla.tools/guides/?lang=es" />
+    <link rel="alternate" hreflang="fr" href="https://bla.tools/guides/?lang=fr" />
+    <link rel="alternate" hreflang="de" href="https://bla.tools/guides/?lang=de" />
+    <link rel="alternate" hreflang="x-default" href="https://bla.tools/guides/" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms.txt" title="BLA LLM Documentation" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms-full.txt" title="BLA Full Technical Reference" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="BLA (bla-agents)" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:locale:alternate" content="zh_TW" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta property="og:locale:alternate" content="ko_KR" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:url" content="https://bla.tools/guides/" />
+    <meta property="og:title" content="Technical Defense Guides — Electron, WASM, Native &amp; AI Models | BLA" />
+    <meta
+      property="og:description"
+      content="Deep-dive protection guides covering parameterized MBA obfuscation, Agent-Driven Weave, compile-time C/Rust/Go headers, self-seal, and sidecar entanglement."
+    />
+    <meta property="og:image" content="https://bla.tools/assets/social-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BLA Technical Defense Guides" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Technical Defense Guides — BLA (bla-agents)" />
+    <meta
+      name="twitter:description"
+      content="Protect Electron ASAR, JS/TS, WASM, Python, ELF/Mach-O/PE binaries, SQLite, and GGUF/Safetensors models against AI reverse engineering."
+    />
+    <meta name="twitter:image" content="https://bla.tools/assets/social-card.png" />
+    <meta name="twitter:image:alt" content="BLA Technical Defense Guides" />
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/logo.png" />
+    <link rel="manifest" href="../site.webmanifest" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Overview", "item": "https://bla.tools/" },
+              { "@type": "ListItem", "position": 2, "name": "Guides", "item": "https://bla.tools/guides/" }
+            ]
+          },
+          {
+            "@type": "TechArticle",
+            "headline": "BLA Technical Defense & Format Hardening Guides",
+            "url": "https://bla.tools/guides/",
+            "mainEntityOfPage": "https://bla.tools/guides/",
+            "image": "https://bla.tools/assets/social-card.png",
+            "datePublished": "2026-10-25",
+            "dateModified": "2026-11-16",
+            "proficiencyLevel": "Expert",
+            "author": { "@type": "Organization", "name": "BLA (Blind LLM Agents)", "url": "https://bla.tools/" },
+            "publisher": { "@type": "Organization", "name": "BLA (Blind LLM Agents)", "url": "https://bla.tools/" },
+            "description": "Technical reference for protecting multi-format software releases against MCP-driven reverse-engineering agents using BLA."
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <style>
+        @media (max-width: 1023px) {
+          .nav-toggle { display: none !important; }
+          .nav-panel {
+            display: flex !important;
+            position: static !important;
+            flex-direction: column;
+            background: transparent;
+            box-shadow: none;
+          }
+          .nav-bar { height: auto !important; min-height: 64px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+          .nav-links { flex-wrap: wrap; }
+        }
+      </style>
+    </noscript>
+    <header class="site-header">
+      <div class="container nav-bar">
+        <a href="../" class="brand">
+          <img src="../assets/logo.png" alt="BLA Shield Logo" class="brand-logo" width="38" height="38" decoding="async" />
+          <span>BLA</span>
+        </a>
+        <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav">
+          <span class="nav-toggle-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <div class="nav-panel" id="site-nav">
+        <nav class="nav-links" data-i18n-attr="aria-label:nav.primary">
+          <a href="../" class="nav-link" data-i18n="nav.overview">Overview</a>
+          <a href="../get-started/" class="nav-link" data-i18n="nav.getStarted">Get Started</a>
+          <a href="../showcase/" class="nav-link" data-i18n="nav.showcase">Benchmarks</a>
+          <a href="../crackme/" class="nav-link" data-i18n="nav.crackme">CrackMe</a>
+          <a href="./" class="nav-link active" data-i18n="nav.guides">Guides</a>
+          <a href="../faq/" class="nav-link" data-i18n="nav.faq">FAQ</a>
+          <a href="../enterprise/" class="nav-link" data-i18n="nav.enterprise">Enterprise</a>
+        </nav>
+        <div class="nav-actions">
+          <select id="bla-lang-select" class="lang-select" aria-label="Select Language" data-i18n-attr="aria-label:nav.lang">
+            <option value="en">🌐 English</option>
+            <option value="zh-CN">🌐 简体中文</option>
+            <option value="zh-TW">🌐 繁體中文</option>
+            <option value="ja">🌐 日本語</option>
+            <option value="ko">🌐 한국어</option>
+            <option value="es">🌐 Español</option>
+            <option value="fr">🌐 Français</option>
+            <option value="de">🌐 Deutsch</option>
+          </select>
+          <a href="https://github.com/qybaihe/bla" class="nav-cta" target="_blank" rel="noopener">
+            <span>★</span>
+            <span data-i18n="nav.star">Star</span>
+            <span class="star-pill" data-gh-stars data-state="loading">—</span>
+          </a>
+        </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <div class="eyebrow" data-i18n="gd.eyebrow">Technical Architecture Guides</div>
+            <h1 class="section-title" data-i18n="gd.title">How BLA Protects Build Artifacts</h1>
+            <p class="section-lead" data-i18n-html="gd.lead">
+              Each protection pass is designed around the static analyzers, resource caps, and evidence rules used by automated reverse-engineering pipelines.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <span class="card-tag" data-i18n="pillars.c1.tag">01 · Resource Budget Guards</span>
+              <h3 data-i18n="pillars.c1.title">Saturate Static &amp; Semantic Limits</h3>
+              <p data-i18n-html="pillars.c1.desc">
+                Triggers analyzer admission caps with O(1) runtime identities inside unreachable branches.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Analyzer Limit Mapping</summary>
+                <div class="drawer-body">• SEMANTIC_PRIMITIVE_CANDIDATE_LIMIT = 256 -> 9-chunk opaque ternary (512)
+• SEMANTIC_ALIAS_SELECTION_LIMIT = 512 -> 528+ dynamic selector states
+• SEMANTIC_PRIMITIVE_JSON_BYTES_LIMIT = 1 MiB -> (codeUnits * 6 + 2) expansion
+• ReconstructionObligationPolicies -> 22-family obligation expansion</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag" data-i18n="pillars.c2.tag">02 · Evidence &amp; Control-Flow Decoys</span>
+              <h3 data-i18n="pillars.c2.title">Demote Real Paths, Surface Decoy Logic</h3>
+              <p data-i18n-html="pillars.c2.desc">
+                Demotes core business logic to status: "unknown" under static inspection while presenting self-consistent shadow state machines.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Shadow Business Logic Strategy</summary>
+                <div class="drawer-body">1. Demote real logic to status: "unknown" via static budget guards.
+2. Provide self-consistent Shadow Business Logic (Shamir-Ed25519 rings, tiered billing matrices, TPM2 PCR0 quotes).
+3. Include enclave delegation metadata (vsock CID 16) and decoy VLQ source maps.</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag" data-i18n="pillars.c3.tag">03 · One-Command Workflow</span>
+              <h3 data-i18n="pillars.c3.title">MCP Server, CLI &amp; Bundler Plugins</h3>
+              <p data-i18n-html="pillars.c3.desc">
+                Run <code>npx bla-agents setup</code> to register with Claude Code, Cursor, Codex, Windsurf, or Gemini CLI, then run the protection pipeline with <code>bla_harden</code>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View 4-Stage Agent Closed Loop</summary>
+                <div class="drawer-body">Stage 1 · Recon: bla_audit + inspectReleaseExposure
+Stage 2 · Plan: bla_weave_plan (identifies sensitive branches &amp; sidecar bindings)
+Stage 3 · Verify Weave: bla_verify_weave (validates source-level decoy surgery)
+Stage 4 · Seal &amp; Verify: bla_harden + bla_verify (atomic write + runtime equivalence)</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">04 · Runtime &amp; Integrity Binding</span>
+              <h3>Self-Seal Digest &amp; Sidecar Entanglement</h3>
+              <p>
+                Binds entry points to sibling artifacts and runtime memory masks so stripping a decoy table or sidecar module fails closed at load time.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Integrity &amp; Memory-Diff Defenses</summary>
+                <div class="drawer-body">• Self-Seal: final-byte digest finalized at the atomic write chokepoint
+• Sidecar Entanglement: binds JS, Python, and WASM entries to sibling SHA-256 digests
+• Split-Share XOR Memory Shield: masks M0 -> M1 heap snapshot diffing</div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div data-i18n-html="footer.tagline"><strong>BLA (`bla-agents`)</strong> · Blind LLM Agents · Software Protection MCP &amp; CLI</div>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="../" data-i18n="nav.overview">Overview</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../get-started/" data-i18n="nav.getStarted">Get Started</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../showcase/" data-i18n="nav.showcase">Benchmarks</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../crackme/" data-i18n="nav.crackme">CrackMe</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../faq/" data-i18n="nav.faq">FAQ</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../enterprise/" data-i18n="nav.enterprise">Enterprise</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../llms.txt">llms.txt</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="mailto:qybaihe@gmail.com">qybaihe@gmail.com</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="https://github.com/qybaihe/bla">GitHub ★</a>
+        </nav>
+        <p class="live-stamp" data-live-stamp="stars" data-state="loading"></p>
+      </div>
+    </footer>
+    <script src="../assets/i18n.js"></script>
+    <script type="module" src="../assets/main.js"></script>
+  </body>
+</html>

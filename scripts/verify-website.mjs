@@ -1,0 +1,637 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const REQUIRED_HTML_PAGES = [
+  "index.html",
+  "get-started/index.html",
+  "showcase/index.html",
+  "crackme/index.html",
+  "guides/index.html",
+  "faq/index.html",
+  "enterprise/index.html",
+];
+
+const REQUIRED_ASSETS = [
+  "robots.txt",
+  "sitemap.xml",
+  "llms.txt",
+  "llms-full.txt",
+  "site.webmanifest",
+  "assets/styles.css",
+  "assets/main.js",
+  "assets/live-stats.mjs",
+  "assets/i18n.js",
+  "assets/home.js",
+  "assets/logo.png",
+  "assets/favicon.png",
+  "assets/favicon.svg",
+  "assets/icon-192.png",
+  "assets/icon-512.png",
+  "assets/social-card.svg",
+  "assets/social-card.png",
+  "schemas/defense-manifest-v1.json",
+  "schemas/bla.config.v1.json",
+];
+
+const SUPPORTED_LOCALES = ["en", "zh-CN", "zh-TW", "ja", "ko", "es", "fr", "de"];
+
+function extractIds(html) {
+  const ids = new Set();
+  const re = /\bid\s*=\s*(?:"([^"]+)"|'([^']+)')/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    ids.add(m[1] ?? m[2]);
+  }
+  return ids;
+}
+
+function extractCspContent(html) {
+  const metaRe = /<meta\b[^>]*http-equiv\s*=\s*(?:"Content-Security-Policy"|'Content-Security-Policy')[^>]*>/i;
+  const tag = metaRe.exec(html)?.[0];
+  if (!tag) return null;
+  const contentRe = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+  const m = contentRe.exec(tag);
+  return m ? (m[1] ?? m[2] ?? "") : null;
+}
+
+function extractLocalRefs(html) {
+  const refs = [];
+  const re = /\b(?:href|src)\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const val = (m[1] ?? m[2] ?? "").trim();
+    if (
+      !val ||
+      val.startsWith("http://") ||
+      val.startsWith("https://") ||
+      val.startsWith("mailto:") ||
+      val.startsWith("data:") ||
+      val.startsWith("javascript:")
+    ) {
+      continue;
+    }
+    refs.push(val);
+  }
+  return refs;
+}
+
+function extractI18nKeys(html) {
+  const keys = new Set();
+  const re = /\bdata-i18n(?:-html)?\s*=\s*(?:"([^"]+)"|'([^']+)')/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    keys.add(m[1] ?? m[2]);
+  }
+  return keys;
+}
+
+/**
+ * Every HTML page under the site root, repo-relative with POSIX separators.
+ * A page added later is verified automatically instead of silently skipped.
+ */
+function discoverHtmlPages(absRoot) {
+  const pages = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".html")) {
+        pages.push(full.slice(absRoot.length + 1).replaceAll("\\", "/"));
+      }
+    }
+  };
+  if (existsSync(absRoot)) walk(absRoot);
+  return pages.sort();
+}
+
+/**
+ * Strict, zero-dependency static parser for `window.BLA_I18N = { ... };`.
+ * Runs without `node_modules` (Website Check CI does not run `npm ci`) and
+ * never evaluates JavaScript.
+ */
+function parseStaticI18nSource(source) {
+  const text = source.startsWith("\uFEFF") ? source.slice(1) : source;
+  let pos = 0;
+
+  const skipTrivia = () => {
+    while (pos < text.length) {
+      const ch = text[pos];
+      if (ch === " " || ch === "\t" || ch === "\r" || ch === "\n") {
+        pos++;
+        continue;
+      }
+      if (ch === "/" && text[pos + 1] === "/") {
+        pos += 2;
+        while (pos < text.length && text[pos] !== "\n" && text[pos] !== "\r") pos++;
+        continue;
+      }
+      if (ch === "/" && text[pos + 1] === "*") {
+        const end = text.indexOf("*/", pos + 2);
+        if (end === -1) throw new Error("unterminated block comment");
+        pos = end + 2;
+        continue;
+      }
+      break;
+    }
+  };
+
+  const expectChar = (expected) => {
+    skipTrivia();
+    if (text[pos] !== expected) {
+      throw new Error(`expected '${expected}' at offset ${pos}`);
+    }
+    pos++;
+  };
+
+  const readIdentifier = () => {
+    skipTrivia();
+    const start = pos;
+    if (pos >= text.length || !/[A-Za-z_$]/.test(text[pos])) {
+      throw new Error(`expected identifier at offset ${pos}`);
+    }
+    pos++;
+    while (pos < text.length && /[A-Za-z0-9_$]/.test(text[pos])) pos++;
+    return text.slice(start, pos);
+  };
+
+  const readString = () => {
+    skipTrivia();
+    const quote = text[pos];
+    if (quote !== '"' && quote !== "'") {
+      throw new Error(`expected string literal at offset ${pos}`);
+    }
+    pos++;
+    let out = "";
+    while (pos < text.length) {
+      const ch = text[pos++];
+      if (ch === quote) return out;
+      if (ch === "\n" || ch === "\r") throw new Error("unterminated string literal");
+      if (ch !== "\\") {
+        out += ch;
+        continue;
+      }
+      if (pos >= text.length) throw new Error("unterminated escape sequence");
+      const esc = text[pos++];
+      switch (esc) {
+        case "\\": out += "\\"; break;
+        case '"': out += '"'; break;
+        case "'": out += "'"; break;
+        case "n": out += "\n"; break;
+        case "r": out += "\r"; break;
+        case "t": out += "\t"; break;
+        case "b": out += "\b"; break;
+        case "f": out += "\f"; break;
+        case "v": out += "\v"; break;
+        case "0":
+          if (/[0-9]/.test(text[pos] ?? "")) throw new Error("octal escape not allowed");
+          out += "\0";
+          break;
+        case "\n": break;
+        case "\r":
+          if (text[pos] === "\n") pos++;
+          break;
+        case "x": {
+          const hex = text.slice(pos, pos + 2);
+          if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Error("invalid hex escape");
+          pos += 2;
+          out += String.fromCharCode(Number.parseInt(hex, 16));
+          break;
+        }
+        case "u": {
+          if (text[pos] === "{") {
+            const close = text.indexOf("}", pos + 1);
+            if (close === -1) throw new Error("unterminated unicode codepoint escape");
+            const hex = text.slice(pos + 1, close);
+            if (!/^[0-9a-fA-F]{1,6}$/.test(hex)) throw new Error("invalid unicode codepoint escape");
+            const cp = Number.parseInt(hex, 16);
+            if (cp > 0x10ffff) throw new Error("unicode codepoint out of range");
+            pos = close + 1;
+            out += String.fromCodePoint(cp);
+          } else {
+            const hex = text.slice(pos, pos + 4);
+            if (!/^[0-9a-fA-F]{4}$/.test(hex)) throw new Error("invalid unicode escape");
+            pos += 4;
+            out += String.fromCharCode(Number.parseInt(hex, 16));
+          }
+          break;
+        }
+        default:
+          out += esc;
+          break;
+      }
+    }
+    throw new Error("unterminated string literal");
+  };
+
+  const readObject = (readValue) => {
+    expectChar("{");
+    const result = Object.create(null);
+    skipTrivia();
+    while (text[pos] !== "}") {
+      const ch = text[pos];
+      let name;
+      if (ch === '"' || ch === "'") {
+        name = readString();
+      } else if (ch && /[A-Za-z_$]/.test(ch)) {
+        name = readIdentifier();
+      } else {
+        throw new Error(`expected static property key at offset ${pos}`);
+      }
+      if (name === "__proto__" || Object.hasOwn(result, name)) {
+        throw new Error("object keys must be unique literal names");
+      }
+      skipTrivia();
+      if (text[pos] !== ":") {
+        throw new Error("expected a static object property");
+      }
+      pos++;
+      result[name] = readValue();
+      skipTrivia();
+      if (text[pos] === ",") {
+        pos++;
+        skipTrivia();
+        continue;
+      }
+      if (text[pos] === "}") break;
+      throw new Error(`expected ',' or '}' at offset ${pos}`);
+    }
+    pos++;
+    return result;
+  };
+
+  if (readIdentifier() !== "window") {
+    throw new Error("expected a single static window.BLA_I18N assignment");
+  }
+  expectChar(".");
+  if (readIdentifier() !== "BLA_I18N") {
+    throw new Error("expected a single static window.BLA_I18N assignment");
+  }
+  expectChar("=");
+  const dict = readObject(() => readObject(readString));
+  skipTrivia();
+  if (text[pos] === ";") pos++;
+  skipTrivia();
+  if (pos !== text.length) {
+    throw new Error("expected a single static window.BLA_I18N assignment");
+  }
+  return dict;
+}
+
+function loadI18nDictionary(absRoot, errors) {
+  const i18nPath = resolve(absRoot, "assets/i18n.js");
+  if (!existsSync(i18nPath) || !statSync(i18nPath).isFile()) return null;
+  try {
+    return parseStaticI18nSource(readFileSync(i18nPath, "utf8"));
+  } catch (error) {
+    errors.push(`assets/i18n.js: invalid static dictionary (${error.message})`);
+    return null;
+  }
+}
+
+function computeI18nCoverage(dict, usedKeys, errors) {
+  const en = dict.en ?? {};
+  const englishKeys = Object.keys(en);
+  for (const key of usedKeys) {
+    if (!englishKeys.includes(key)) {
+      errors.push(`assets/i18n.js: data-i18n key '${key}' has no English string`);
+    }
+  }
+  const locales = {};
+  for (const locale of SUPPORTED_LOCALES) {
+    const table = dict[locale];
+    if (table === null || typeof table !== "object") {
+      errors.push(`assets/i18n.js: locale '${locale}' is missing`);
+      locales[locale] = { keys: 0, missingFromEnglish: englishKeys.length };
+      continue;
+    }
+    locales[locale] = {
+      keys: Object.keys(table).length,
+      missingFromEnglish: englishKeys.filter((key) => !(key in table)).length,
+    };
+  }
+  return {
+    referenceLocale: "en",
+    referenceKeys: englishKeys.length,
+    locales,
+  };
+}
+
+/**
+ * Verify all static website HTML pages, assets, CSP headers, and internal links/anchors.
+ *
+ * @param {string} [websiteRoot]
+ * @returns {{
+ *   ok: boolean,
+ *   pagesChecked: number,
+ *   linksChecked: number,
+ *   errors: string[],
+ *   i18nCoverage: { referenceLocale: string, referenceKeys: number, locales: Record<string, { keys: number, missingFromEnglish: number }> } | null,
+ * }}
+ */
+export function verifyWebsiteDirectory(websiteRoot = resolve(REPO_ROOT, "website")) {
+  const absRoot = resolve(websiteRoot);
+  const errors = [];
+  let pagesChecked = 0;
+  let linksChecked = 0;
+
+  for (const rel of REQUIRED_ASSETS) {
+    const full = resolve(absRoot, rel);
+    if (!existsSync(full) || !statSync(full).isFile()) {
+      errors.push(`Missing required asset: ${rel}`);
+    }
+  }
+
+  const pageCache = new Map();
+  const idCache = new Map();
+  const usedI18nKeys = new Set();
+  const sitemapPath = resolve(absRoot, "sitemap.xml");
+  const sitemapXml = existsSync(sitemapPath) && statSync(sitemapPath).isFile()
+    ? readFileSync(sitemapPath, "utf8")
+    : "";
+  const robotsPath = resolve(absRoot, "robots.txt");
+  if (existsSync(robotsPath) && statSync(robotsPath).isFile()) {
+    const robotsTxt = readFileSync(robotsPath, "utf8");
+    if (!robotsTxt.includes("Sitemap: https://bla.tools/sitemap.xml")) {
+      errors.push("robots.txt: missing Sitemap: https://bla.tools/sitemap.xml directive");
+    }
+  }
+
+  const discovered = discoverHtmlPages(absRoot);
+  const pageList = [...new Set([...REQUIRED_HTML_PAGES, ...discovered])].sort();
+
+  for (const rel of pageList) {
+    const full = resolve(absRoot, rel);
+    if (!existsSync(full) || !statSync(full).isFile()) {
+      errors.push(`Missing required HTML page: ${rel}`);
+      continue;
+    }
+    const html = readFileSync(full, "utf8");
+    pageCache.set(full, html);
+    idCache.set(full, extractIds(html));
+    for (const key of extractI18nKeys(html)) usedI18nKeys.add(key);
+  }
+
+  for (const rel of pageList) {
+    const full = resolve(absRoot, rel);
+    const html = pageCache.get(full);
+    if (html === undefined) continue;
+    pagesChecked++;
+
+    const csp = extractCspContent(html);
+    if (!csp) {
+      errors.push(`${rel}: missing Content-Security-Policy <meta> tag`);
+    } else {
+      if (!/default-src\s+[^;]*'self'/i.test(csp)) {
+        errors.push(`${rel}: CSP missing default-src 'self'`);
+      }
+      if (!/script-src\s+[^;]*'self'/i.test(csp)) {
+        errors.push(`${rel}: CSP missing script-src 'self'`);
+      }
+      if (!/object-src\s+[^;]*'none'/i.test(csp)) {
+        errors.push(`${rel}: CSP missing object-src 'none'`);
+      }
+      if (/'unsafe-eval'/i.test(csp)) {
+        errors.push(`${rel}: CSP must not allow 'unsafe-eval'`);
+      }
+      if (/script-src\s+[^;]*'unsafe-inline'/i.test(csp)) {
+        errors.push(`${rel}: CSP must not allow script-src 'unsafe-inline'`);
+      }
+      if (!/connect-src[^;]*https:\/\/api\.github\.com/i.test(csp)) {
+        errors.push(`${rel}: CSP must allow https://api.github.com for live figures`);
+      }
+    }
+
+    if (/data-gh-stars[^>]*>\s*\d/.test(html) || /data-gh-stars[^>]*>\s*★/.test(html)) {
+      errors.push(`${rel}: star pill must not ship a hardcoded count`);
+    }
+    if (!html.includes('data-live-stamp="stars"')) {
+      errors.push(`${rel}: missing visible GitHub star source stamp`);
+    }
+    if (!/<script\s+type="module"\s+src="(?:\.\.\/)?assets\/main\.js"><\/script>/.test(html)) {
+      errors.push(`${rel}: main.js must load as a module`);
+    }
+    if (rel === "crackme/index.html" && !html.includes("data-crackme-live")) {
+      errors.push(`${rel}: missing repository challenge status panel`);
+    }
+
+    if (/brand-badge|data-i18n=["']nav\.badge["']|蓝军防护|藍軍防護|BLUE SHIELD v1\./.test(html)) {
+      errors.push(`${rel}: navigation shield badge must be removed`);
+    }
+    if (/\bonclick\s*=/i.test(html)) {
+      errors.push(`${rel}: inline onclick is not allowed`);
+    }
+    if (!html.includes('class="nav-toggle"') || !html.includes('id="site-nav"')) {
+      errors.push(`${rel}: accessible nav collapse control is missing`);
+    }
+    if (!html.includes('aria-controls="site-nav"') || !html.includes('aria-expanded="false"')) {
+      errors.push(`${rel}: nav toggle missing aria-expanded or aria-controls`);
+    }
+    if (!html.includes('class="nav-links"') || !html.includes('id="bla-lang-select"') || !html.includes('class="nav-cta"')) {
+      errors.push(`${rel}: language switch, primary nav, or Star control is missing`);
+    }
+
+    // SEO & Structured Metadata Checks
+    const seoPageMatch = /<html\b[^>]*data-seo-page=["']([a-z0-9-]+)["']/i.exec(html);
+    if (!seoPageMatch) {
+      errors.push(`${rel}: missing data-seo-page attribute on <html>`);
+    } else {
+      usedI18nKeys.add(`seo.${seoPageMatch[1]}.title`);
+      usedI18nKeys.add(`seo.${seoPageMatch[1]}.desc`);
+    }
+    if (!/<title>[^<]{10,}<\/title>/i.test(html)) {
+      errors.push(`${rel}: missing or too-short <title>`);
+    }
+    if (!/<meta\b[^>]*name=["']description["'][^>]*content=["'][^"']{40,}["']/i.test(html)) {
+      errors.push(`${rel}: missing or too-short <meta name="description">`);
+    }
+    const canonicalMatch = /<link\b[^>]*rel=["']canonical["'][^>]*href=["'](https:\/\/bla\.tools\/[^"']*)["']/i.exec(html);
+    if (!canonicalMatch) {
+      errors.push(`${rel}: missing <link rel="canonical" href="https://bla.tools/...">`);
+    } else if (sitemapXml && !sitemapXml.includes(`<loc>${canonicalMatch[1]}</loc>`)) {
+      errors.push(`${rel}: canonical URL '${canonicalMatch[1]}' is missing from sitemap.xml`);
+    }
+    if (!/<link\b[^>]*hreflang=["']x-default["']/i.test(html)) {
+      errors.push(`${rel}: missing <link rel="alternate" hreflang="x-default">`);
+    }
+    if (!/<meta\b[^>]*property=["']og:locale["'][^>]*content=["'][^"']+["']/i.test(html)) {
+      errors.push(`${rel}: missing OpenGraph og:locale`);
+    }
+    if (!/<meta\b[^>]*property=["']og:title["'][^>]*content=["'][^"']+["']/i.test(html)) {
+      errors.push(`${rel}: missing OpenGraph og:title`);
+    }
+    if (!/<meta\b[^>]*property=["']og:description["'][^>]*content=["'][^"']+["']/i.test(html)) {
+      errors.push(`${rel}: missing OpenGraph og:description`);
+    }
+    if (!html.includes('property="og:image" content="https://bla.tools/assets/social-card.png"')) {
+      errors.push(`${rel}: og:image must reference https://bla.tools/assets/social-card.png`);
+    }
+    if (!/<meta\b[^>]*property=["']og:image:type["'][^>]*content=["']image\/png["']/i.test(html)) {
+      errors.push(`${rel}: missing og:image:type image/png`);
+    }
+    if (!/<meta\b[^>]*name=["']twitter:card["'][^>]*content=["']summary_large_image["']/i.test(html)) {
+      errors.push(`${rel}: missing twitter:card summary_large_image`);
+    }
+    if (!/<meta\b[^>]*name=["']twitter:image:alt["'][^>]*content=["'][^"']+["']/i.test(html)) {
+      errors.push(`${rel}: missing twitter:image:alt`);
+    }
+    const jsonLdMatches = [...html.matchAll(/<script\s+type=["']application\/ld\+json["']\s*>([\s\S]*?)<\/script>/gi)];
+    if (jsonLdMatches.length === 0) {
+      errors.push(`${rel}: missing Schema.org JSON-LD (<script type="application/ld+json">)`);
+    } else {
+      for (const m of jsonLdMatches) {
+        try {
+          const parsed = JSON.parse(m[1]);
+          if (!parsed || parsed["@context"] !== "https://schema.org") {
+            errors.push(`${rel}: JSON-LD missing "@context": "https://schema.org"`);
+          }
+        } catch (err) {
+          errors.push(`${rel}: invalid JSON-LD syntax (${err instanceof Error ? err.message : String(err)})`);
+        }
+      }
+    }
+
+    const pageDir = dirname(full);
+    for (const ref of extractLocalRefs(html)) {
+      linksChecked++;
+      const [rawPath, rawHash] = ref.split("#", 2);
+      let targetFile = full;
+      if (rawPath && rawPath.length > 0) {
+        const candidate = resolve(pageDir, rawPath);
+        // startsWith() would accept a same-prefix sibling such as
+        // "<parent>/website-evil" for a root of "<parent>/website".
+        const toRoot = relative(absRoot, candidate);
+        if (toRoot === ".." || toRoot.startsWith(`..${sep}`) || isAbsolute(toRoot)) {
+          errors.push(`${rel}: link escapes website root (${ref})`);
+          continue;
+        }
+        if (existsSync(candidate) && statSync(candidate).isDirectory()) {
+          targetFile = resolve(candidate, "index.html");
+        } else {
+          targetFile = candidate;
+        }
+        if (!existsSync(targetFile) || !statSync(targetFile).isFile()) {
+          errors.push(`${rel}: broken link target '${ref}'`);
+          continue;
+        }
+      }
+      if (rawHash && rawHash.length > 0) {
+        let ids = idCache.get(targetFile);
+        if (!ids && existsSync(targetFile) && statSync(targetFile).isFile()) {
+          const targetHtml = readFileSync(targetFile, "utf8");
+          ids = extractIds(targetHtml);
+          idCache.set(targetFile, ids);
+        }
+        if (!ids || !ids.has(rawHash)) {
+          errors.push(`${rel}: broken anchor '#${rawHash}' in '${ref}'`);
+        }
+      }
+    }
+  }
+
+  const i18nDict = loadI18nDictionary(absRoot, errors);
+  let i18nCoverage = null;
+  if (i18nDict !== null) {
+    i18nCoverage = computeI18nCoverage(i18nDict, usedI18nKeys, errors);
+    if (Object.values(i18nDict).some((table) => Object.hasOwn(table, "nav.badge"))) {
+      errors.push("assets/i18n.js: nav.badge must be removed");
+    }
+    for (const key of [
+      "nav.menu",
+      "nav.menuClose",
+      "nav.primary",
+      "nav.lang",
+      "live.stars.live",
+      "live.stars.stale",
+      "live.stars.unavailable",
+      "live.crackme.noSolve",
+      "live.crackme.commitment",
+    ]) {
+      const count = SUPPORTED_LOCALES.filter((locale) => Object.hasOwn(i18nDict[locale] ?? {}, key)).length;
+      if (count < SUPPORTED_LOCALES.length) {
+        errors.push(`assets/i18n.js: ${key} must exist in all 8 languages (found ${count})`);
+      }
+    }
+  }
+
+  const livePath = resolve(absRoot, "assets/live-stats.mjs");
+  if (existsSync(livePath)) {
+    const live = readFileSync(livePath, "utf8");
+    if (!live.includes("STAR_REFRESH_MS = 5 * 60 * 1000")) {
+      errors.push("assets/live-stats.mjs: star refresh must stay at 5 minutes");
+    }
+    if (!live.includes("CRACKME_REFRESH_MS = 10 * 60 * 1000")) {
+      errors.push("assets/live-stats.mjs: CrackMe refresh must stay at 10 minutes");
+    }
+    if (!live.includes("FETCH_TIMEOUT_MS = 8000")) {
+      errors.push("assets/live-stats.mjs: fetch timeout must stay at 8 seconds");
+    }
+    if (!live.includes("stargazers_count")) {
+      errors.push("assets/live-stats.mjs: stars must come from stargazers_count");
+    }
+  }
+
+  const cssPath = resolve(absRoot, "assets/styles.css");
+  if (existsSync(cssPath)) {
+    const css = readFileSync(cssPath, "utf8");
+    if (/\.brand-badge\b/.test(css)) {
+      errors.push("assets/styles.css: .brand-badge must be removed");
+    }
+    if (!/\.nav-link\s*\{[^}]*white-space:\s*nowrap/.test(css)) {
+      errors.push("assets/styles.css: .nav-link must stay on one line (white-space: nowrap)");
+    }
+    if (!/@media\s*\(\s*max-width:\s*1023px\s*\)/.test(css)) {
+      errors.push("assets/styles.css: missing max-width 1023px nav collapse breakpoint");
+    }
+  }
+
+  const mainPath = resolve(absRoot, "assets/main.js");
+  if (existsSync(mainPath)) {
+    const main = readFileSync(mainPath, "utf8");
+    if (!main.includes("initNavMenu") || !main.includes('addEventListener("click"')) {
+      errors.push("assets/main.js: nav toggle must be wired without inline handlers");
+    }
+    if (!main.includes('from "./live-stats.mjs"') || !main.includes("startLiveFigures")) {
+      errors.push("assets/main.js: live star and CrackMe figures must be wired");
+    }
+    if (main.includes("toFixed") || main.includes("bla_gh_stars")) {
+      errors.push("assets/main.js: do not abbreviate stars or reuse the untimed star cache");
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    pagesChecked,
+    linksChecked,
+    errors,
+    i18nCoverage,
+  };
+}
+
+const isDirectRun =
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  const res = verifyWebsiteDirectory();
+  if (!res.ok) {
+    for (const err of res.errors) {
+      console.error(`Website verification error: ${err}`);
+    }
+    process.exit(1);
+  }
+  console.log(
+    `Verified ${res.pagesChecked} website HTML pages and ${res.linksChecked} internal links/assets.`,
+  );
+  if (res.i18nCoverage !== null) {
+    const summary = Object.entries(res.i18nCoverage.locales)
+      .map(([locale, counts]) => `${locale} ${counts.keys}`)
+      .join(", ");
+    console.log(
+      `i18n coverage against ${res.i18nCoverage.referenceLocale} (${res.i18nCoverage.referenceKeys} keys): ${summary}. Missing keys fall back to English at runtime.`,
+    );
+  }
+}

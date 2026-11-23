@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en" data-seo-page="get-started">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://ungh.cc https://raw.githubusercontent.com; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <title>Get Started with BLA (bla-agents) — MCP Setup, CLI &amp; Bundler Plugins</title>
+    <meta
+      name="description"
+      content="Install BLA in seconds: register the Counter-REA MCP server across Claude Code, Cursor, Codex, Windsurf, or Gemini CLI, harden builds with npx bla-agents harden ., or add Vite/Webpack/esbuild plugins."
+    />
+    <meta
+      name="keywords"
+      content="bla-agents install, BLA MCP setup, Claude Code MCP security, Cursor MCP server, Vite obfuscation plugin, Webpack protection plugin, esbuild obfuscation, npx bla-agents harden"
+    />
+    <meta name="author" content="BLA Contributors" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="theme-color" content="#040814" />
+    <link rel="canonical" href="https://bla.tools/get-started/" />
+    <link rel="alternate" hreflang="en" href="https://bla.tools/get-started/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://bla.tools/get-started/?lang=zh-CN" />
+    <link rel="alternate" hreflang="zh-TW" href="https://bla.tools/get-started/?lang=zh-TW" />
+    <link rel="alternate" hreflang="ja" href="https://bla.tools/get-started/?lang=ja" />
+    <link rel="alternate" hreflang="ko" href="https://bla.tools/get-started/?lang=ko" />
+    <link rel="alternate" hreflang="es" href="https://bla.tools/get-started/?lang=es" />
+    <link rel="alternate" hreflang="fr" href="https://bla.tools/get-started/?lang=fr" />
+    <link rel="alternate" hreflang="de" href="https://bla.tools/get-started/?lang=de" />
+    <link rel="alternate" hreflang="x-default" href="https://bla.tools/get-started/" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms.txt" title="BLA LLM Documentation" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms-full.txt" title="BLA Full Technical Reference" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="BLA (bla-agents)" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:locale:alternate" content="zh_TW" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta property="og:locale:alternate" content="ko_KR" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:url" content="https://bla.tools/get-started/" />
+    <meta property="og:title" content="Get Started with BLA (bla-agents) — MCP Setup, CLI &amp; Bundler Plugins" />
+    <meta
+      property="og:description"
+      content="One-command setup for Claude Code, Cursor, Codex &amp; Gemini CLI, plus CLI hardening workflows and Vite/Rollup/Webpack/esbuild integration."
+    />
+    <meta property="og:image" content="https://bla.tools/assets/social-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Get Started with BLA (bla-agents)" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Get Started with BLA (bla-agents) — MCP Setup &amp; CLI" />
+    <meta
+      name="twitter:description"
+      content="Register BLA's MCP tools in one command and harden JS/TS, Electron, WASM, Python, and native binaries against AI reverse engineering."
+    />
+    <meta name="twitter:image" content="https://bla.tools/assets/social-card.png" />
+    <meta name="twitter:image:alt" content="Get Started with BLA (bla-agents) — MCP Setup, CLI &amp; Bundler Plugins" />
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/logo.png" />
+    <link rel="manifest" href="../site.webmanifest" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Overview", "item": "https://bla.tools/" },
+              { "@type": "ListItem", "position": 2, "name": "Get Started", "item": "https://bla.tools/get-started/" }
+            ]
+          },
+          {
+            "@type": "HowTo",
+            "name": "How to Protect Software Artifacts Against AI Reverse Engineering with BLA",
+            "description": "Register BLA's MCP server with your coding agent and harden build outputs in three steps.",
+            "totalTime": "PT1M",
+            "image": "https://bla.tools/assets/social-card.png",
+            "tool": [
+              { "@type": "HowToTool", "name": "Node.js ^22.23.4 || >=24.0.0" },
+              { "@type": "HowToTool", "name": "bla-agents CLI / MCP Server" }
+            ],
+            "step": [
+              {
+                "@type": "HowToStep",
+                "position": 1,
+                "name": "Register MCP Server & Agent Skill",
+                "url": "https://bla.tools/get-started/",
+                "text": "Run npx bla-agents@latest setup --all-detected --yes to configure Claude Code, Cursor, Codex, Windsurf, Gemini CLI, or Antigravity."
+              },
+              {
+                "@type": "HowToStep",
+                "position": 2,
+                "name": "Audit & Lint Release Packaging",
+                "url": "https://bla.tools/get-started/",
+                "text": "Run npx bla-agents@latest lint . to check for source-map, plaintext secret, and debug-symbol leaks."
+              },
+              {
+                "@type": "HowToStep",
+                "position": 3,
+                "name": "Harden & Verify Artifacts",
+                "url": "https://bla.tools/get-started/",
+                "text": "Run npx bla-agents@latest harden . --weave-decoys --self-seal --sidecar-entangle to protect discovered artifacts and verify runtime equivalence."
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <style>
+        @media (max-width: 1023px) {
+          .nav-toggle { display: none !important; }
+          .nav-panel {
+            display: flex !important;
+            position: static !important;
+            flex-direction: column;
+            background: transparent;
+            box-shadow: none;
+          }
+          .nav-bar { height: auto !important; min-height: 64px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+          .nav-links { flex-wrap: wrap; }
+        }
+      </style>
+    </noscript>
+    <header class="site-header">
+      <div class="container nav-bar">
+        <a href="../" class="brand">
+          <img src="../assets/logo.png" alt="BLA Shield Logo" class="brand-logo" width="38" height="38" decoding="async" />
+          <span>BLA</span>
+        </a>
+        <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav">
+          <span class="nav-toggle-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <div class="nav-panel" id="site-nav">
+        <nav class="nav-links" data-i18n-attr="aria-label:nav.primary">
+          <a href="../" class="nav-link" data-i18n="nav.overview">Overview</a>
+          <a href="./" class="nav-link active" data-i18n="nav.getStarted">Get Started</a>
+          <a href="../showcase/" class="nav-link" data-i18n="nav.showcase">Benchmarks</a>
+          <a href="../crackme/" class="nav-link" data-i18n="nav.crackme">CrackMe</a>
+          <a href="../guides/" class="nav-link" data-i18n="nav.guides">Guides</a>
+          <a href="../faq/" class="nav-link" data-i18n="nav.faq">FAQ</a>
+          <a href="../enterprise/" class="nav-link" data-i18n="nav.enterprise">Enterprise</a>
+        </nav>
+        <div class="nav-actions">
+          <select id="bla-lang-select" class="lang-select" aria-label="Select Language" data-i18n-attr="aria-label:nav.lang">
+            <option value="en">🌐 English</option>
+            <option value="zh-CN">🌐 简体中文</option>
+            <option value="zh-TW">🌐 繁體中文</option>
+            <option value="ja">🌐 日本語</option>
+            <option value="ko">🌐 한국어</option>
+            <option value="es">🌐 Español</option>
+            <option value="fr">🌐 Français</option>
+            <option value="de">🌐 Deutsch</option>
+          </select>
+          <a href="https://github.com/qybaihe/bla" class="nav-cta" target="_blank" rel="noopener">
+            <span>★</span>
+            <span data-i18n="nav.star">Star</span>
+            <span class="star-pill" data-gh-stars data-state="loading">—</span>
+          </a>
+        </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <div class="eyebrow" data-i18n="gs.eyebrow">Quick Start</div>
+            <h1 class="section-title" data-i18n="gs.title">Configure Your Agent or Run from the Terminal</h1>
+            <p class="section-lead" data-i18n="gs.lead">
+              Requires Node.js 22.13+ or 24+. No external compilers or third-party packers required.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <span class="card-tag" data-i18n="gs.s1.tag">Step 1 · Agent MCP Setup</span>
+              <h3 data-i18n="gs.s1.title">Register BLA with Your Coding Agent</h3>
+              <p data-i18n-html="gs.s1.desc">
+                Configures Claude Code, Cursor, Codex, Windsurf, Gemini CLI, and Antigravity with the <code>bla</code> MCP server and <code>blind-llm-agents</code> skill.
+              </p>
+              <pre class="code-block">npx bla-agents@latest setup --all-detected --yes</pre>
+            </div>
+
+            <div class="card">
+              <span class="card-tag" data-i18n="gs.s2.tag">Step 2 · 5-Stage Protection Pipeline</span>
+              <h3 data-i18n="gs.s2.title">Audit, Protect, and Verify in One Command</h3>
+              <p data-i18n="gs.s2.desc">
+                Runs source-map exposure checks, static audit, format-specific protection, and runtime equivalence verification. Pass --manifest only if you want an unsigned attestation JSON next to artifacts.
+              </p>
+              <pre class="code-block">npx bla-agents@latest harden .</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <div class="eyebrow" data-i18n="gs.s3.eyebrow">Agent &amp; Bundler Integration</div>
+            <h2 class="section-title" data-i18n="gs.s3.title">Use Natural Language or Build Plugins</h2>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <span class="card-tag" data-i18n="gs.s3.c1.tag">Agent Prompt</span>
+              <h3 data-i18n="gs.s3.c1.title">Prompt for Claude Code / Cursor</h3>
+              <p data-i18n-html="gs.s3.c1.desc">Once <code>setup</code> is complete, ask your coding agent:</p>
+              <pre class="code-block">"Harden my software against REA (bla_harden on the project directory)."</pre>
+            </div>
+
+            <div class="card">
+              <span class="card-tag" data-i18n="gs.s3.c2.tag">Build Bundler Plugin</span>
+              <h3 data-i18n="gs.s3.c2.title">Build-Time Protection</h3>
+              <p data-i18n="gs.s3.c2.desc">Integrates with Vite, Rollup, Webpack, and esbuild:</p>
+              <pre class="code-block">import { blaVitePlugin } from "bla-agents/bundler";
+
+export default {
+  plugins: [blaVitePlugin({ intensity: "bankrupt" })],
+};</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div data-i18n-html="footer.tagline"><strong>BLA (`bla-agents`)</strong> · Blind LLM Agents · Software Protection MCP &amp; CLI</div>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="../" data-i18n="nav.overview">Overview</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../showcase/" data-i18n="nav.showcase">Benchmarks</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../guides/" data-i18n="nav.guides">Guides</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../crackme/" data-i18n="nav.crackme">CrackMe</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../faq/" data-i18n="nav.faq">FAQ</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../enterprise/" data-i18n="nav.enterprise">Enterprise</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../llms.txt">llms.txt</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="mailto:qybaihe@gmail.com">qybaihe@gmail.com</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="https://github.com/qybaihe/bla">GitHub ★</a>
+        </nav>
+        <p class="live-stamp" data-live-stamp="stars" data-state="loading"></p>
+      </div>
+    </footer>
+    <script src="../assets/i18n.js"></script>
+    <script type="module" src="../assets/main.js"></script>
+  </body>
+</html>

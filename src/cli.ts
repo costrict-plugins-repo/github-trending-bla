@@ -1,0 +1,1504 @@
+#!/usr/bin/env node
+import { readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { BLA_IDENTITY } from "./identity.js";
+import {
+  initBlaConfig,
+  loadBlaConfig,
+  resolveProjectSeed,
+  type BlaProjectConfig,
+} from "./core/config.js";
+import { inspectReleaseExposure } from "./core/release-exposure.js";
+import { buildSarifReport } from "./core/sarif.js";
+import { sanitizeTerminalText } from "./core/terminal-text.js";
+import { verifyManifestFile } from "./core/manifest-verify.js";
+import type { ProtectionIntensity } from "./core/types.js";
+import { auditTarget } from "./engine/auditor.js";
+import { protectTarget, resolveProtectOutputPath, writeFileAtomicSync } from "./engine/protector.js";
+import { expandSiblingGlobs } from "./core/sibling-globs.js";
+import { verifyTarget } from "./engine/verifier.js";
+import { defendTarget } from "./engine/defender.js";
+import {
+  formatHardenProjectReport,
+  hardenProject,
+  restoreHardenedProject,
+} from "./engine/harden.js";
+import { loadApplyState, resolveApplyStateDirectory, type HardenApplyReport } from "./engine/harden-apply.js";
+import { sha256File } from "./engine/run-evidence.js";
+import { registerBlaOutput } from "./core/output-registry.js";
+import { lintLaneIndependence } from "./engine/lane-independence-lint.js";
+import { lintSealCommitmentFile } from "./engine/seal-commitment-lint.js";
+import { lintWasmParamCarrierFile } from "./engine/wasm-param-carrier-lint.js";
+import { lintPanelDeriveAbiFile } from "./engine/panel-derive-abi-lint.js";
+import { lintJsAesUnwrapFile } from "./engine/js-aes-unwrap-lint.js";
+import { lintJsWasmHydrateDumpFile } from "./engine/js-wasm-hydrate-dump-lint.js";
+import { lintWasmXorMaskSidecarFile } from "./engine/wasm-xor-mask-sidecar-lint.js";
+import { lintWasmSealXorKnownPlaintextFile } from "./engine/wasm-seal-xor-known-plaintext-lint.js";
+import {
+  scanPackagingGates,
+  formatPackagingGatesReport,
+  buildPackagingGatesSarif,
+} from "./engine/packaging-gates.js";
+import { runShowcaseBenchmark } from "./engine/benchmark.js";
+import { verifySidecarTarget } from "./engine/verify-sidecar.js";
+import {
+  emitCompileTimeNativeHeader,
+  type NativeHeaderLanguage,
+} from "./shields/formats/headers.js";
+import { type SupportedAgentClientId } from "./setup/clients.js";
+import { runSetup, runUninstall } from "./setup/setup.js";
+import { runDoctor } from "./setup/doctor.js";
+import { startMcpStdioServer } from "./mcp/server.js";
+import { buildWeavePlan, verifyWeaveTarget } from "./shields/weave/weave-decoy.js";
+import {
+  formatAuditReport,
+  formatBanner,
+  formatBenchmarkReport,
+  formatDoctorReport,
+  formatOneClickDefenseReport,
+  formatProtectionResult,
+  formatSetupReport,
+  formatVerificationReport,
+} from "./ui/reporter.js";
+
+function printHelp(): void {
+  console.log(`${formatBanner()}
+
+Usage:
+  npx bla-agents <command> [options]
+  npx bla-shield <command> [options]
+  bla <command> [options]
+
+Quick start:
+  npx bla-agents setup -y          # register bla_harden with your agent
+  bla harden .                     # one-sentence Counter-REA hardening
+  # or tell your agent: "Harden my software against REA"
+
+Commands:
+  setup                       Configure agent MCP integrations & install the BLA skill
+  harden [dir]                DEFAULT: auto-discover build outputs under a project/build dir and bankrupt-harden all of them
+  defend <target>             One-click full Counter-REA pipeline (inspect -> audit -> bankrupt protect -> verify)
+  inspect-release <target>    Read-only local source-map & symbol exposure check
+  audit <target>              Pre-flight REA exposure & vulnerability scan
+  lint [dir]                  DEFAULT packaging gate scan (all R1–R7 refuse lints + lanes/panel); exit 2 on refuse
+  lint-lanes <file>           Heuristic ERROR if gate code looks lane-independent (issue #40.1); exit 2
+  lint-wasm-params <file>    Heuristic ERROR if WASM embeds clear R3PARM/R3CIPH/R2SEAL-class carriers; exit 2
+  lint-panel-derive <file>   Heuristic ERROR if stable __vaultPanelDerive_* / deriveLocal oracle remains; exit 2
+  lint-js-aes-unwrap <file>  Heuristic ERROR if JS AES wrap-key + create*iv + fixed hdr unwrap; exit 2
+  lint-js-wasm-hydrate-dump <file>  Heuristic ERROR if JS dumps WASM hydrate salt/rounds/cipher; exit 2
+  lint-wasm-xor-mask-sidecar <file> Heuristic ERROR if WASM data has XOR-mask beside masked entitlement pack; exit 2
+  lint-wasm-seal-xor-known-plaintext <wasm>  Heuristic ERROR if seal.revision is XOR known-plaintext in WASM pack; exit 2
+  lint-seal <file>            Heuristic lint for plaintext/reversible seal sidecars (red-blue round-2); exit 2 on error
+  protect <target>            Inject multi-layer Counter-REA adversarial shield
+  verify <target> [original]  Verify Counter-REA defense invariants & token amplification
+  weave-plan <target>         Emit AST-level surgical weave workorder (bla-weave-plan/v1)
+  verify-weave <target>       Verify Agent-authored source weave & return agentActions (exit 2 on fail)
+  benchmark                   Run the 14-target Counter-REA Showcase Benchmark suite
+  emit-headers                Generate compile-time C/C++, Rust, or Go defense headers
+  verify-manifest <file>      Verify a signed .bla-manifest.json (exit 2 when invalid)
+  verify-sidecar <entry>      Offline strip⇒fail sidecar check (exit 2 when invalid or runtime-only)
+  doctor                      Check readiness of BLA engines & agent registrations
+  update                      Update global bla-shield installation & print setup refresh instructions
+  uninstall                   Remove BLA MCP configuration & skill files
+  mcp                         Start the BLA Model Context Protocol (MCP) server over stdio
+
+Options:
+  -o, --output <path>         Output file or directory path (for protect / emit-headers)
+  --base-dir <path>           Base directory for resolving relative sidecar paths (verify-sidecar)
+  --in-place                  Overwrite input target in-place (for protect)
+  --intensity <preset>        stealth | balanced | maximum | bankrupt
+                            (harden/defend default: bankrupt; protect default: balanced)
+  --seed <seed>               Deterministic PRNG seed (default: per-project random in .blarc)
+  --manifest                  Emit .bla-manifest.json next to protected artifacts (harden/defend; opt-in)
+  --sign-manifest             Ed25519-sign the emitted manifest (harden/defend; implies --manifest)
+  --manifest-key <path>       Ed25519 private key PEM file used by --sign-manifest (harden/defend)
+  --public-key <path>         Trusted ed25519 public key PEM for verify-manifest
+  --require-pinned-key        verify-manifest: exit 2 unless --public-key authenticated the manifest
+  --require-artifact          verify-manifest: exit 2 unless the protected artifact's SHA-256 was verified
+  --llm-directives            Opt-in risky LLM directive layers (COPPA/medical bait, dual-use imitation, AI chat markers); OFF by default
+  --weave-decoys              Opt-in structural weave decoys (Python customer-def / .pyc co_consts weave; JS AST weave already on); OFF by default
+  --self-seal                 Opt-in self-seal / sibling-module integrity binding for JS/Node targets (issue #40.5); OFF by default
+  --self-seal-sibling-glob <a,b>  Comma-separated globs (cwd-relative) expanded into self-seal sibling paths; requires --self-seal (protect only)
+  --sidecar-entangle          Opt-in sidecar/entry entanglement strip⇒fail for CommonJS & ESM JS/Python/ASAR + WASM/Bun/.pyc/GGUF/Safetensors notes (issue #40); ESM static imports still evaluate before the entry hook; OFF by default
+  --wasm-preserve-exports <a,b>  Comma-separated WASM export names to keep as public ABI (issue #40.3)
+  --exclude <a,b>             harden: comma-separated project-relative paths or globs to leave out (repeatable); for the
+                              one file that breaks or slows the program when hardened. Excluded files ship unprotected
+  --allow-lane-independent    Allow harden/defend of lane-independent JS gates (issue #40.1); OFF by default
+  --allow-plaintext-seal      Allow bankrupt harden despite plaintext/reversible seal JSON (round-2); OFF by default
+  --allow-js-wasm-hydrate-dump  Allow bankrupt despite JS←WASM hydrate param-dump (round-5); OFF by default
+  --allow-wasm-xor-mask-sidecar  Allow bankrupt despite WASM XOR-mask-beside-blob packs (round-6); OFF by default
+  --allow-wasm-seal-xor-known-plaintext  Allow bankrupt despite seal.revision XOR known-plaintext packs (round-7); OFF by default
+  --lang <c|rust|go>          Target language for emit-headers (default: c)
+  --fail-under <n>            Exit 2 when the score fails the gate: defense score < n (defend/verify) or audit exposure score > n (audit)
+  --client <id>               Agent client ID for setup/uninstall (repeatable: claude_code, cursor, codex, etc.)
+  --all-detected              Configure all detected coding agents on this machine
+  --all-clients               Configure all 10 supported coding agents (including undetected)
+  --force                     Force setup/uninstall overwrite when custom SKILL.md or MCP entry conflicts
+  --require-agent-weave       Enforce verified Stage-2 Agent source weave before harden/defend
+  --sqlite-eval-trap          SQLite: honey-table columns call a function no stock connection has, so an inspector
+                              cannot read those rows — and the application cannot run PRAGMA integrity_check,
+                              VACUUM or a dump/restore on that database. OFF by default
+  --verify-handshake          doctor: self-test MCP initialize with the installed BLA CLI
+  --apply                     harden: overwrite the build output with the hardened files (originals are backed up
+                              outside the project; source files are never overwritten); re-runs re-harden from the originals
+  --restore                   harden: undo --apply and put the original build output back
+  --dry-run                   Preview planned setup/uninstall/harden changes without writing files
+  -y, --yes                   Approve setup actions without interactive confirmation
+  --json                      Emit structured JSON output
+  -v, --version               Print BLA version
+  -h, --help                  Print this help guide
+`);
+}
+
+interface ParsedCliArgs {
+  readonly command: string;
+  readonly positionals: string[];
+  readonly output?: string;
+  readonly configPath?: string;
+  readonly inPlace: boolean;
+  readonly intensity: ProtectionIntensity;
+  readonly seed?: string;
+  readonly manifest: boolean;
+  readonly signManifest: boolean;
+  readonly manifestKey?: string;
+  readonly publicKey?: string;
+  readonly artifactPath?: string;
+  readonly baseDir?: string;
+  readonly requirePinnedKey: boolean;
+  readonly requireArtifact: boolean;
+  readonly llmDirectives: boolean;
+  readonly weaveDecoys: boolean;
+  readonly selfSeal: boolean;
+  readonly selfSealSiblingGlobs: readonly string[];
+  readonly sidecarEntangle: boolean;
+  readonly requireAgentWeave: boolean;
+  readonly sqliteEvalTrap: boolean;
+  readonly wasmPreserveExports: readonly string[];
+  /** `--exclude`: paths / globs `harden` leaves out. */
+  readonly exclude: readonly string[];
+  readonly allowLaneIndependentGates: boolean;
+  readonly allowPlaintextSeal: boolean;
+  readonly allowWasmClearParamCarriers: boolean;
+  readonly allowStablePanelDeriveAbi: boolean;
+  readonly allowJsAesUnwrap: boolean;
+  readonly allowPanelOfflineOracle: boolean;
+  readonly allowJsWasmHydrateDump: boolean;
+  readonly allowWasmXorMaskSidecar: boolean;
+  readonly allowWasmSealXorKnownPlaintext: boolean;
+  readonly allowPlaintextString: boolean;
+  readonly allowSinglePointIntegrity: boolean;
+  readonly allowMissingBindRuntime: boolean;
+  readonly allowReleaseHygieneLeak: boolean;
+  readonly lang: NativeHeaderLanguage;
+  readonly clients: SupportedAgentClientId[];
+  readonly allDetected: boolean;
+  readonly allClients: boolean;
+  readonly force: boolean;
+  readonly dryRun: boolean;
+  readonly apply: boolean;
+  readonly restore: boolean;
+  readonly verifyHandshake: boolean;
+  readonly yes: boolean;
+  readonly json: boolean;
+  readonly sarif: boolean;
+  readonly failUnder?: number;
+  readonly argErrors: readonly string[];
+  readonly honeyMaps: boolean;
+  readonly help: boolean;
+  readonly version: boolean;
+}
+
+/**
+ * Flags that always take a value. `--flag=value` is expanded into two tokens
+ * before parsing so every value flag accepts both spellings.
+ */
+const CLI_VALUE_FLAGS = new Set<string>([
+  "-o",
+  "--output",
+  "-c",
+  "--config",
+  "--fail-under",
+  "--intensity",
+  "--seed",
+  "--lang",
+  "--manifest-key",
+  "--public-key",
+  "--artifact",
+  "--client",
+  "--wasm-preserve-exports",
+  "--exclude",
+  "--self-seal-sibling-glob",
+  "--base-dir",
+]);
+
+export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
+  let command = "";
+  const positionals: string[] = [];
+  let output: string | undefined;
+  let configPath: string | undefined;
+  let inPlace = false;
+  let intensity: ProtectionIntensity = "balanced";
+  let seed: string | undefined;
+  let manifest = false;
+  let signManifest = false;
+  let manifestKey: string | undefined;
+  let publicKey: string | undefined;
+  let artifactPath: string | undefined;
+  let baseDir: string | undefined;
+  let requirePinnedKey = false;
+  let requireArtifact = false;
+  let llmDirectives = false;
+  let weaveDecoys = false;
+  let selfSeal = false;
+  let selfSealSiblingGlobs: string[] = [];
+  let sidecarEntangle = false;
+  let requireAgentWeave = false;
+  let sqliteEvalTrap = false;
+  let wasmPreserveExports: string[] = [];
+  const exclude: string[] = [];
+  let allowLaneIndependentGates = false;
+  let allowPlaintextSeal = false;
+  let allowWasmClearParamCarriers = false;
+  let allowStablePanelDeriveAbi = false;
+  let allowJsAesUnwrap = false;
+  let allowJsWasmHydrateDump = false;
+  let allowWasmXorMaskSidecar = false;
+  let allowWasmSealXorKnownPlaintext = false;
+  let allowPlaintextString = false;
+  let allowSinglePointIntegrity = false;
+  let allowMissingBindRuntime = false;
+  let allowReleaseHygieneLeak = false;
+  let allowPanelOfflineOracle = false;
+  let lang: NativeHeaderLanguage = "c";
+  const clients: SupportedAgentClientId[] = [];
+  const argErrors: string[] = [];
+  let allDetected = false;
+  let allClients = false;
+  let force = false;
+  let dryRun = false;
+  let apply = false;
+  let restore = false;
+  let verifyHandshake = false;
+  let yes = false;
+  let json = false;
+  let sarif = false;
+  let failUnder: number | undefined;
+  let honeyMaps = true;
+  let help = false;
+  let version = false;
+
+  const expandedArgs: string[] = [];
+  for (const raw of argv) {
+    const eq = raw.startsWith("--") ? raw.indexOf("=") : -1;
+    if (eq > 2 && CLI_VALUE_FLAGS.has(raw.slice(0, eq))) {
+      expandedArgs.push(raw.slice(0, eq), raw.slice(eq + 1));
+      continue;
+    }
+    expandedArgs.push(raw);
+  }
+
+  let flagsEnded = false;
+  for (let i = 0; i < expandedArgs.length; i++) {
+    const arg = expandedArgs[i]!;
+    if (flagsEnded) {
+      if (!command) command = arg;
+      else positionals.push(arg);
+      continue;
+    }
+    if (arg === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (arg === "-h" || arg === "--help") {
+      help = true;
+    } else if (arg === "-v" || arg === "--version") {
+      version = true;
+    } else if (arg === "--json") {
+      json = true;
+    } else if (arg === "--sarif") {
+      sarif = true;
+    } else if (arg === "-y" || arg === "--yes") {
+      yes = true;
+    } else if (arg === "--dry-run") {
+      dryRun = true;
+    } else if (arg === "--apply") {
+      apply = true;
+    } else if (arg === "--restore") {
+      restore = true;
+    } else if (arg === "--verify-handshake") {
+      verifyHandshake = true;
+    } else if (arg === "--all-detected") {
+      allDetected = true;
+    } else if (arg === "--all-clients" || arg === "--include-undetected") {
+      allClients = true;
+    } else if (arg === "-f" || arg === "--force") {
+      force = true;
+    } else if (arg === "--in-place") {
+      inPlace = true;
+    } else if (arg === "--no-honey-maps") {
+      honeyMaps = false;
+    } else if (arg === "--manifest") {
+      manifest = true;
+    } else if (arg === "--sign-manifest") {
+      signManifest = true;
+    } else if (arg === "--manifest-key") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push("--manifest-key requires a value");
+      else manifestKey = value;
+    } else if (arg === "--public-key") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push("--public-key requires a value");
+      else publicKey = value;
+    } else if (arg === "--artifact") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push("--artifact requires a value");
+      else artifactPath = value;
+    } else if (arg === "--base-dir") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push("--base-dir requires a value");
+      else baseDir = value;
+    } else if (arg === "--require-pinned-key") {
+      requirePinnedKey = true;
+    } else if (arg === "--require-artifact") {
+      requireArtifact = true;
+    } else if (arg === "--llm-directives") {
+      llmDirectives = true;
+    } else if (arg === "--weave-decoys") {
+      weaveDecoys = true;
+    } else if (arg === "--self-seal") {
+      selfSeal = true;
+    } else if (arg === "--self-seal-sibling-glob") {
+      const value = expandedArgs[++i];
+      if (value === undefined) {
+        argErrors.push("--self-seal-sibling-glob requires a value");
+      } else {
+        const patterns = value
+          .split(",")
+          .map((p) => p.trim())
+          .filter((p) => p.length > 0);
+        if (patterns.length === 0) {
+          argErrors.push("--self-seal-sibling-glob requires at least one pattern");
+        }
+        selfSealSiblingGlobs.push(...patterns);
+      }
+    } else if (arg === "--sidecar-entangle") {
+      sidecarEntangle = true;
+    } else if (arg === "--require-agent-weave") {
+      requireAgentWeave = true;
+    } else if (arg === "--sqlite-eval-trap") {
+      sqliteEvalTrap = true;
+    } else if (arg === "--allow-lane-independent") {
+      allowLaneIndependentGates = true;
+    } else if (arg === "--allow-plaintext-seal") {
+      allowPlaintextSeal = true;
+    } else if (arg === "--allow-wasm-clear-params") {
+      allowWasmClearParamCarriers = true;
+    } else if (arg === "--allow-stable-panel-derive") {
+      allowStablePanelDeriveAbi = true;
+    } else if (arg === "--allow-js-aes-unwrap") {
+      allowJsAesUnwrap = true;
+    } else if (arg === "--allow-panel-offline-oracle") {
+      allowPanelOfflineOracle = true;
+    } else if (arg === "--allow-js-wasm-hydrate-dump") {
+      allowJsWasmHydrateDump = true;
+    } else if (arg === "--allow-wasm-xor-mask-sidecar") {
+      allowWasmXorMaskSidecar = true;
+    } else if (arg === "--allow-wasm-seal-xor-known-plaintext") {
+      allowWasmSealXorKnownPlaintext = true;
+    } else if (arg === "--allow-plaintext-string") {
+      allowPlaintextString = true;
+    } else if (arg === "--allow-single-point-integrity") {
+      allowSinglePointIntegrity = true;
+    } else if (arg === "--allow-missing-bind-runtime") {
+      allowMissingBindRuntime = true;
+    } else if (arg === "--allow-release-hygiene-leak") {
+      allowReleaseHygieneLeak = true;
+    } else if (arg === "--wasm-preserve-exports") {
+      const value = expandedArgs[++i];
+      if (value === undefined) {
+        argErrors.push("--wasm-preserve-exports requires a value");
+      } else {
+        wasmPreserveExports = value
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    } else if (arg === "--exclude") {
+      const value = expandedArgs[++i];
+      if (value === undefined) {
+        argErrors.push("--exclude requires a value");
+      } else {
+        exclude.push(
+          ...value
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        );
+      }
+    } else if (arg === "--mcp") {
+      command = "mcp";
+    } else if (arg === "--update") {
+      command = "update";
+    } else if (arg === "-o" || arg === "--output") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push(`${arg} requires a value`);
+      else output = value;
+    } else if (arg === "-c" || arg === "--config") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push(`${arg} requires a value`);
+      else configPath = value;
+    } else if (arg === "--fail-under") {
+      const raw = expandedArgs[++i];
+      const n = raw === undefined ? Number.NaN : Number(raw);
+      if (raw === undefined) {
+        argErrors.push("--fail-under requires a value");
+      } else if (!Number.isFinite(n) || n < 0 || n > 100) {
+        argErrors.push(`--fail-under must be a number between 0 and 100 (received '${raw}')`);
+      } else {
+        failUnder = n;
+      }
+    } else if (arg === "--intensity") {
+      const val = expandedArgs[++i];
+      if (val === undefined) {
+        argErrors.push("--intensity requires a value");
+      } else if (!["stealth", "balanced", "maximum", "bankrupt"].includes(val)) {
+        argErrors.push(`--intensity must be one of stealth, balanced, maximum, bankrupt (received '${val}')`);
+      } else {
+        intensity = val as ProtectionIntensity;
+      }
+    } else if (arg === "--seed") {
+      const val = expandedArgs[++i];
+      if (val === undefined || val.trim().length === 0) {
+        argErrors.push("--seed requires a non-empty value");
+      } else {
+        seed = val;
+      }
+    } else if (arg === "--lang") {
+      const val = expandedArgs[++i];
+      if (val === undefined) {
+        argErrors.push("--lang requires a value");
+      } else if (!["c", "rust", "go"].includes(val)) {
+        argErrors.push(`--lang must be one of c, rust, go (received '${val}')`);
+      } else {
+        lang = val as NativeHeaderLanguage;
+      }
+    } else if (arg === "--client") {
+      const value = expandedArgs[++i];
+      if (value === undefined) argErrors.push("--client requires a value");
+      else clients.push(value as SupportedAgentClientId);
+    } else if (!arg.startsWith("-")) {
+      if (!command) command = arg;
+      else positionals.push(arg);
+    } else {
+      const flagKey = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+      const hintMap: Readonly<Record<string, string>> = {
+        "--mode": "--intensity",
+        "--preset": "--intensity",
+        "--level": "--intensity",
+        "--strength": "--intensity",
+        "--out": "--output",
+        "--seal": "--self-seal",
+        "--entangle": "--sidecar-entangle",
+        "--weave": "--weave-decoys",
+        "--directives": "--llm-directives",
+      };
+      const hint = hintMap[flagKey];
+      argErrors.push(
+        hint !== undefined
+          ? `unknown option '${arg}' (did you mean '${hint}'?)`
+          : `unknown option '${arg}'`,
+      );
+    }
+  }
+
+  if (selfSealSiblingGlobs.length > 0) {
+    if (!selfSeal) {
+      argErrors.push("--self-seal-sibling-glob requires --self-seal");
+    }
+    if (command !== "protect") {
+      argErrors.push("--self-seal-sibling-glob is only supported for the protect command");
+    }
+  }
+
+  // protect has no manifest stage: ProtectionOptions carries no manifest field,
+  // so accepting the flags here would silently produce nothing.
+  if (
+    command === "protect" &&
+    (manifest || signManifest || manifestKey !== undefined)
+  ) {
+    argErrors.push(
+      "--manifest / --sign-manifest / --manifest-key are not supported by the protect command; use harden or defend",
+    );
+  }
+
+  return {
+    command,
+    positionals,
+    ...(output !== undefined ? { output } : {}),
+    ...(configPath !== undefined ? { configPath } : {}),
+    inPlace,
+    intensity,
+    ...(seed !== undefined ? { seed } : {}),
+    manifest,
+    signManifest,
+    ...(manifestKey !== undefined ? { manifestKey } : {}),
+    ...(publicKey !== undefined ? { publicKey } : {}),
+    ...(artifactPath !== undefined ? { artifactPath } : {}),
+    ...(baseDir !== undefined ? { baseDir } : {}),
+    requirePinnedKey,
+    requireArtifact,
+    llmDirectives,
+    weaveDecoys,
+    selfSeal,
+    selfSealSiblingGlobs,
+    sidecarEntangle,
+    requireAgentWeave,
+    sqliteEvalTrap,
+    wasmPreserveExports,
+    exclude,
+    allowLaneIndependentGates,
+    allowPlaintextSeal,
+    allowWasmClearParamCarriers,
+    allowStablePanelDeriveAbi,
+    allowJsAesUnwrap,
+    allowPanelOfflineOracle,
+    allowJsWasmHydrateDump,
+    allowWasmXorMaskSidecar,
+    allowWasmSealXorKnownPlaintext,
+    allowPlaintextString,
+    allowSinglePointIntegrity,
+    allowMissingBindRuntime,
+    allowReleaseHygieneLeak,
+    lang,
+    clients,
+    allDetected,
+    allClients,
+    force,
+    dryRun,
+    apply,
+    restore,
+    verifyHandshake,
+    yes,
+    json,
+    sarif,
+    ...(failUnder !== undefined ? { failUnder } : {}),
+    argErrors,
+    honeyMaps,
+    help,
+    version,
+  };
+}
+
+/**
+ * Expand cwd-relative sibling globs into paths relative to the protected
+ * output's directory (what the shipped self-seal preamble resolves at runtime).
+ * Exported for tests.
+ */
+export function resolveSelfSealSiblingPaths(options: {
+  readonly root: string;
+  readonly globs: readonly string[];
+  readonly targetPath: string;
+  readonly outputPath?: string;
+  readonly inPlace?: boolean;
+}): string[] {
+  if (options.globs.length === 0) return [];
+  const absTarget = resolve(options.targetPath);
+  const absOutput = resolveProtectOutputPath(
+    absTarget,
+    options.outputPath,
+    options.inPlace === true,
+  );
+  const base = dirname(absOutput);
+  return expandSiblingGlobs(options.root, options.globs)
+    .filter((abs) => abs !== absOutput && abs !== absTarget)
+    .map((abs) => relative(base, abs).split(sep).join("/"))
+    .filter((rel) => rel.length > 0 && rel !== ".");
+}
+
+/** Merge CLI and .blarc WASM export preservation lists without duplicates. */
+function mergeWasmPreserveExports(
+  parsed: ParsedCliArgs,
+  config: BlaProjectConfig,
+): { wasmPreserveExports?: readonly string[] } {
+  const merged = [
+    ...new Set([...(config.wasmPreserveExports ?? []), ...parsed.wasmPreserveExports]),
+  ];
+  return merged.length > 0 ? { wasmPreserveExports: merged } : {};
+}
+
+/** Single choke point for engine errors: artifact-derived names must not reach the terminal raw. */
+export function formatCliError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  return `Error: ${sanitizeTerminalText(message)}`;
+}
+
+function previewHardenRestore(directory: string): HardenApplyReport {
+  const root = resolve(directory);
+  const stateDirectory = resolveApplyStateDirectory(root);
+  const state = loadApplyState(stateDirectory);
+  if (!state?.files.length) return { status: "nothing-to-restore" };
+
+  const backupDirectory = join(
+    stateDirectory,
+    state.backupGeneration === undefined ? "originals" : `originals-${state.backupGeneration}`,
+  );
+  const restored: string[] = [];
+  const removed: string[] = [];
+  const skippedModified: string[] = [];
+  const missingBackups: string[] = [];
+  for (const file of state.files) {
+    const path = join(root, file.relativePath);
+    let current: string;
+    try {
+      if (!statSync(path).isFile()) continue;
+      current = sha256File(path);
+    } catch {
+      continue;
+    }
+    if (current === file.originalSha256) continue;
+    if (current !== file.hardenedSha256) {
+      skippedModified.push(file.relativePath);
+      continue;
+    }
+
+    if (file.originalSha256 === null) {
+      removed.push(file.relativePath);
+      continue;
+    }
+    try {
+      if (sha256File(join(backupDirectory, file.relativePath)) === file.originalSha256) {
+        restored.push(file.relativePath);
+        continue;
+      }
+    } catch {
+      // An unreadable backup also prevents restore.
+    }
+    missingBackups.push(file.relativePath);
+  }
+  return {
+    status: missingBackups.length ? "failed" : restored.length || removed.length ? "planned" : "nothing-to-restore",
+    ...(missingBackups.length ? { reason: `Backups missing or damaged for ${missingBackups.join(", ")}` } : {}),
+    restored,
+    removed,
+    skippedModified,
+    backupDirectory,
+  };
+}
+
+export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  const parsed = parseCliArgs(argv);
+
+  if (parsed.version) {
+    console.log(BLA_IDENTITY.version);
+    return 0;
+  }
+
+  // `--help` and `--version` short-circuit on purpose, but a bad flag must not
+  // be swallowed just because no subcommand was given: `bla --bogus` used to
+  // print help and exit 0, so a CI typo looked like success.
+  if (parsed.help) {
+    printHelp();
+    return 0;
+  }
+
+  if (parsed.argErrors.length > 0) {
+    for (const message of parsed.argErrors) console.error(`Error: ${message}`);
+    return 1;
+  }
+
+  if (parsed.command === "mcp") {
+    startMcpStdioServer();
+    return 0;
+  }
+
+  if (!parsed.command) {
+    printHelp();
+    return 0;
+  }
+
+  try {
+    switch (parsed.command) {
+      case "setup": {
+        const res = runSetup({
+          ...(parsed.clients.length > 0 ? { clientIds: parsed.clients } : {}),
+          allDetected: parsed.allDetected,
+          includeUndetected: parsed.allClients,
+          force: parsed.force,
+          dryRun: parsed.dryRun,
+          yes: parsed.yes,
+          env: process.env,
+        });
+        if (parsed.json) console.log(JSON.stringify(res, null, 2));
+        else console.log(formatSetupReport(res));
+        return res.status === "applied" || res.status === "planned" ? 0 : 1;
+      }
+
+      case "doctor": {
+        const doc = runDoctor({
+          verifyHandshake: parsed.verifyHandshake,
+          env: process.env,
+          projectDirectory: process.cwd(),
+        });
+        if (parsed.json) console.log(JSON.stringify(doc, null, 2));
+        else console.log(formatDoctorReport(doc));
+        return doc.healthy ? 0 : 1;
+      }
+
+      case "update": {
+        const updateInfo = {
+          currentVersion: BLA_IDENTITY.version,
+          package: BLA_IDENTITY.packageName,
+          packageAlias: BLA_IDENTITY.packageAlias,
+          refreshSetupCommand: "npx bla-agents@latest setup",
+          globalUpdateCommand: "npm install --global bla-agents@latest",
+        };
+        if (parsed.json) {
+          console.log(JSON.stringify(updateInfo, null, 2));
+        } else {
+          console.log(`${formatBanner()}\n\nBLA v${BLA_IDENTITY.version} update workflow:\n  • Global CLI update:   npm install --global bla-agents@latest\n  • Agent MCP refresh:   npx bla-agents@latest setup\n`);
+        }
+        return 0;
+      }
+
+      case "uninstall": {
+        const res = runUninstall({
+          ...(parsed.clients.length > 0 ? { clientIds: parsed.clients } : {}),
+          force: parsed.force,
+          dryRun: parsed.dryRun,
+          env: process.env,
+        });
+        if (parsed.json) console.log(JSON.stringify(res, null, 2));
+        else if (parsed.dryRun) {
+          console.log(`Dry-run: would remove BLA configuration from ${res.removedClients.length} client(s).`);
+        } else {
+          console.log(`Removed BLA configuration from ${res.removedClients.length} client(s).`);
+        }
+        return res.conflicts.length > 0 ? 1 : 0;
+      }
+
+      case "init": {
+        const dir = parsed.positionals[0] ?? process.cwd();
+        const res = initBlaConfig(dir, parsed.inPlace);
+        if (parsed.json) {
+          console.log(JSON.stringify(res, null, 2));
+        } else {
+          console.log(
+            res.created
+              ? `Created ${res.configPath} (default input: "${res.config.input}", intensity: "${res.config.intensity}").`
+              : `Config already exists at ${res.configPath}. Pass --in-place to overwrite.`,
+          );
+        }
+        return 0;
+      }
+
+      case "inspect-release": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <target> path for `bla inspect-release <target>`.");
+          return 1;
+        }
+        const report = inspectReleaseExposure(target);
+        console.log(JSON.stringify(report, null, 2));
+        return report.status === "complete" ? 0 : 2;
+      }
+
+      case "harden": {
+        const loaded = loadBlaConfig(process.cwd(), parsed.configPath);
+        const directory = parsed.positionals[0] ?? loaded.config.input ?? process.cwd();
+        const explicitIntensity = argv.some(
+          (a) => a === "--intensity" || a.startsWith("--intensity="),
+        )
+          ? parsed.intensity
+          : (loaded.config.intensity ?? "bankrupt");
+        // Resolve the seed against the same root the config is loaded from. Using the
+        // target directory here minted a fresh seed and persisted it as
+        // `<target>/.blarc`, i.e. inside the build output the user is about to
+        // package or publish.
+        if (parsed.restore) {
+          if (parsed.apply) {
+            console.error("Error: --apply and --restore cannot be combined");
+            return 1;
+          }
+          const restored = parsed.dryRun
+            ? previewHardenRestore(directory)
+            : restoreHardenedProject(directory);
+          if (parsed.json) {
+            console.log(JSON.stringify(restored, null, 2));
+          } else if (restored.status === "restored" || restored.status === "planned") {
+            const action = parsed.dryRun ? "Would restore" : "Restored";
+            console.log(
+              `${action} ${restored.restored?.length ?? 0} original file(s):\n${(restored.restored ?? []).map((f) => `  ↩ ${sanitizeTerminalText(f)}`).join("\n")}`,
+            );
+          } else if (restored.status === "nothing-to-restore") {
+            console.log("Nothing to restore: no build output here currently holds applied hardened files.");
+          } else {
+            console.log(`Restore ${restored.status}: ${sanitizeTerminalText(restored.reason ?? "")}`);
+          }
+          if (!parsed.json && (restored.removed?.length ?? 0) > 0) {
+            console.log(
+              `${parsed.dryRun ? "Would remove" : "Removed"} (created by apply): ${(restored.removed ?? []).map((f) => sanitizeTerminalText(f)).join(", ")}`,
+            );
+          }
+          if (!parsed.json && (restored.skippedModified?.length ?? 0) > 0) {
+            console.log(
+              `${parsed.dryRun ? "Would leave alone" : "Left alone"} (changed since apply, e.g. rebuilt): ${(restored.skippedModified ?? []).map((f) => sanitizeTerminalText(f)).join(", ")}`,
+            );
+          }
+          return restored.status === "failed" ? 2 : 0;
+        }
+        const seed = parsed.dryRun
+          ? parsed.seed
+          : resolveProjectSeed(process.cwd(), parsed.seed, parsed.configPath).seed;
+        const report = hardenProject({
+          directory,
+          ...(parsed.apply ? { apply: true } : {}),
+          ...(parsed.exclude.length > 0 ? { exclude: parsed.exclude } : {}),
+          intensity: explicitIntensity,
+          ...(seed !== undefined ? { seed } : {}),
+          dryRun: parsed.dryRun,
+          emitManifest: parsed.manifest || parsed.signManifest === true || loaded.config.emitManifest === true,
+          ...(parsed.signManifest === true
+            ? { signManifest: true, manifestSigningKeyPath: parsed.manifestKey ?? "" }
+            : {}),
+          llmDirectives: parsed.llmDirectives || loaded.config.llmDirectives === true,
+          weaveDecoys: parsed.weaveDecoys || loaded.config.weaveDecoys === true,
+          selfSeal: parsed.selfSeal || loaded.config.selfSeal === true,
+          sidecarEntangle: parsed.sidecarEntangle || loaded.config.sidecarEntangle === true,
+          ...(parsed.requireAgentWeave || loaded.config.requireAgentWeave === true
+            ? { requireAgentWeave: true }
+            : {}),
+          ...(parsed.sqliteEvalTrap || loaded.config.sqliteEvalTrap === true
+            ? { sqliteEvalTrap: true }
+            : {}),
+          ...mergeWasmPreserveExports(parsed, loaded.config),
+          allowLaneIndependentGates:
+            parsed.allowLaneIndependentGates ||
+            loaded.config.allowLaneIndependentGates === true,
+          allowPlaintextSeal:
+            parsed.allowPlaintextSeal ||
+            loaded.config.allowPlaintextSeal === true,
+          allowWasmClearParamCarriers:
+            parsed.allowWasmClearParamCarriers ||
+            loaded.config.allowWasmClearParamCarriers === true,
+          allowStablePanelDeriveAbi:
+            parsed.allowStablePanelDeriveAbi ||
+            loaded.config.allowStablePanelDeriveAbi === true,
+          allowJsAesUnwrap:
+            parsed.allowJsAesUnwrap ||
+            loaded.config.allowJsAesUnwrap === true,
+          allowPanelOfflineOracle:
+            parsed.allowPanelOfflineOracle ||
+            loaded.config.allowPanelOfflineOracle === true,
+          allowJsWasmHydrateDump:
+            parsed.allowJsWasmHydrateDump ||
+            loaded.config.allowJsWasmHydrateDump === true,
+          allowWasmXorMaskSidecar:
+            parsed.allowWasmXorMaskSidecar ||
+            loaded.config.allowWasmXorMaskSidecar === true,
+          allowWasmSealXorKnownPlaintext:
+            parsed.allowWasmSealXorKnownPlaintext ||
+            loaded.config.allowWasmSealXorKnownPlaintext === true,
+          allowReleaseHygieneLeak:
+            parsed.allowReleaseHygieneLeak ||
+            loaded.config.allowReleaseHygieneLeak === true,
+          ...(parsed.output !== undefined ? { outputDirectory: parsed.output } : {}),
+        });
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatHardenProjectReport(report));
+        }
+        // Exit 2 covers both "nothing to harden" and "at least one artifact
+        // failed", matching the refuse-code contract used by the lint commands.
+        if (report.dryRun) return report.discoveredCount === 0 ? 2 : 0;
+        return report.discoveredCount === 0 || !report.overallSuccess ? 2 : 0;
+      }
+
+      case "defend": {
+        const loaded = loadBlaConfig(process.cwd(), parsed.configPath);
+        const target = parsed.positionals[0] ?? loaded.config.input;
+        if (!target) {
+          console.error("Error: Missing <target> path for `bla defend <target>`.");
+          return 1;
+        }
+        const explicitIntensity = argv.some(
+          (a) => a === "--intensity" || a.startsWith("--intensity="),
+        )
+          ? parsed.intensity
+          : (loaded.config.intensity ?? "bankrupt");
+        const resolved = resolveProjectSeed(process.cwd(), parsed.seed, parsed.configPath);
+        const report = defendTarget({
+          inputPath: target,
+          ...((parsed.output ?? loaded.config.output) !== undefined
+            ? { outputPath: (parsed.output ?? loaded.config.output)! }
+            : {}),
+          inPlace: parsed.inPlace,
+          intensity: explicitIntensity,
+          seed: resolved.seed,
+          honeySourceMaps: parsed.honeyMaps && loaded.config.honeySourceMaps !== false,
+          emitManifest: parsed.manifest || parsed.signManifest === true || loaded.config.emitManifest === true,
+          ...(parsed.signManifest === true
+            ? { signManifest: true, manifestSigningKeyPath: parsed.manifestKey ?? "" }
+            : {}),
+          llmDirectives: parsed.llmDirectives || loaded.config.llmDirectives === true,
+          weaveDecoys: parsed.weaveDecoys || loaded.config.weaveDecoys === true,
+          selfSeal: parsed.selfSeal || loaded.config.selfSeal === true,
+          sidecarEntangle: parsed.sidecarEntangle || loaded.config.sidecarEntangle === true,
+          ...(parsed.requireAgentWeave || loaded.config.requireAgentWeave === true
+            ? { requireAgentWeave: true }
+            : {}),
+          ...(parsed.sqliteEvalTrap || loaded.config.sqliteEvalTrap === true
+            ? { sqliteEvalTrap: true }
+            : {}),
+          ...mergeWasmPreserveExports(parsed, loaded.config),
+          allowLaneIndependentGates:
+            parsed.allowLaneIndependentGates ||
+            loaded.config.allowLaneIndependentGates === true,
+          allowPlaintextSeal:
+            parsed.allowPlaintextSeal ||
+            loaded.config.allowPlaintextSeal === true,
+          allowWasmClearParamCarriers:
+            parsed.allowWasmClearParamCarriers ||
+            loaded.config.allowWasmClearParamCarriers === true,
+          allowStablePanelDeriveAbi:
+            parsed.allowStablePanelDeriveAbi ||
+            loaded.config.allowStablePanelDeriveAbi === true,
+          allowJsAesUnwrap:
+            parsed.allowJsAesUnwrap ||
+            loaded.config.allowJsAesUnwrap === true,
+          allowPanelOfflineOracle:
+            parsed.allowPanelOfflineOracle ||
+            loaded.config.allowPanelOfflineOracle === true,
+          allowJsWasmHydrateDump:
+            parsed.allowJsWasmHydrateDump ||
+            loaded.config.allowJsWasmHydrateDump === true,
+          allowWasmXorMaskSidecar:
+            parsed.allowWasmXorMaskSidecar ||
+            loaded.config.allowWasmXorMaskSidecar === true,
+          allowWasmSealXorKnownPlaintext:
+            parsed.allowWasmSealXorKnownPlaintext ||
+            loaded.config.allowWasmSealXorKnownPlaintext === true,
+          allowReleaseHygieneLeak:
+            parsed.allowReleaseHygieneLeak ||
+            loaded.config.allowReleaseHygieneLeak === true,
+        });
+        // Later `bla harden` / `bla lint` runs must recognise this file as
+        // hardened output, not as a fresh artifact full of plaintext "secrets".
+        registerBlaOutput(report.outputPath);
+        if (parsed.sarif) {
+          console.log(
+            JSON.stringify(buildSarifReport(report.beforeAudit, report.releaseExposure), null, 2),
+          );
+        } else if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatOneClickDefenseReport(report));
+        }
+        const threshold = parsed.failUnder ?? loaded.config.minDefenseScore;
+        if (threshold !== undefined && report.verification.defenseScore < threshold) {
+          return 2;
+        }
+        return report.overallSuccess ? 0 : 2;
+      }
+
+      case "lint": {
+        const loaded = loadBlaConfig(process.cwd(), parsed.configPath);
+        const target = parsed.positionals[0] ?? loaded.config.input ?? ".";
+        const report = scanPackagingGates({
+          directory: resolve(target),
+          intensity: argv.some((a) => a === "--intensity" || a.startsWith("--intensity="))
+            ? parsed.intensity
+            : (loaded.config.intensity ?? "bankrupt"),
+          allowPlaintextSeal:
+            parsed.allowPlaintextSeal || loaded.config.allowPlaintextSeal === true,
+          allowWasmClearParamCarriers:
+            parsed.allowWasmClearParamCarriers ||
+            loaded.config.allowWasmClearParamCarriers === true,
+          allowJsAesUnwrap:
+            parsed.allowJsAesUnwrap || loaded.config.allowJsAesUnwrap === true,
+          allowJsWasmHydrateDump:
+            parsed.allowJsWasmHydrateDump || loaded.config.allowJsWasmHydrateDump === true,
+          allowWasmXorMaskSidecar:
+            parsed.allowWasmXorMaskSidecar || loaded.config.allowWasmXorMaskSidecar === true,
+          allowWasmSealXorKnownPlaintext:
+            parsed.allowWasmSealXorKnownPlaintext ||
+            loaded.config.allowWasmSealXorKnownPlaintext === true,
+          allowPlaintextString: parsed.allowPlaintextString,
+          allowSinglePointIntegrity: parsed.allowSinglePointIntegrity,
+          allowMissingBindRuntime: parsed.allowMissingBindRuntime,
+          allowReleaseHygieneLeak:
+            parsed.allowReleaseHygieneLeak || loaded.config.allowReleaseHygieneLeak === true,
+          allowLaneIndependentGates:
+            parsed.allowLaneIndependentGates ||
+            loaded.config.allowLaneIndependentGates === true,
+          allowPanelOfflineOracle:
+            parsed.allowPanelOfflineOracle || loaded.config.allowPanelOfflineOracle === true,
+          allowStablePanelDeriveAbi:
+            parsed.allowStablePanelDeriveAbi ||
+            loaded.config.allowStablePanelDeriveAbi === true,
+          includeProtectTimeGates: true,
+        });
+        if (parsed.json) {
+          // Strip heavy details.details raw blobs for CLI JSON by default — keep findings/blocking.
+          const { details: _details, ...compact } = report;
+          console.log(JSON.stringify({ ...compact, detailCounts: {
+            seals: report.details.seals.length,
+            wasmParams: report.details.wasmParams.length,
+            jsAes: report.details.jsAes.length,
+            jsHydrateDump: report.details.jsHydrateDump.length,
+            wasmXorMask: report.details.wasmXorMask.length,
+            wasmSealXor: report.details.wasmSealXor.length,
+            lanes: report.details.lanes.length,
+            panelDerive: report.details.panelDerive.length,
+            plaintextSecrets: report.details.plaintextSecrets.length,
+            integrityCoverage: report.details.integrityCoverage.length,
+            bindScope: report.details.bindScope.length,
+            releaseHygiene: report.details.releaseHygiene.length,
+          } }, null, 2));
+        } else if (parsed.sarif) {
+          console.log(JSON.stringify(buildPackagingGatesSarif(report), null, 2));
+        } else {
+          console.log(formatPackagingGatesReport(report));
+        }
+        return report.shouldRefuseBankrupt ? 2 : 0;
+      }
+
+      case "lint-lanes": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-lanes <file>`.");
+          return 1;
+        }
+        const source = readFileSync(resolve(target), "utf8");
+        const report = lintLaneIndependence(source);
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA lane-independence lint — ${resolve(target)}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.looksLaneIndependent ? 2 : 0;
+      }
+      case "lint-seal": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-seal <file>`.");
+          return 1;
+        }
+        const report = lintSealCommitmentFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA seal-commitment lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+      case "lint-wasm-params": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-wasm-params <file>`.");
+          return 1;
+        }
+        const report = lintWasmParamCarrierFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA wasm-param-carrier lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary} @${f.offset}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+      case "lint-panel-derive": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-panel-derive <file>`.");
+          return 1;
+        }
+        const report = lintPanelDeriveAbiFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA panel-derive ABI lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt ||
+          report.shouldRewriteOrRefuse ||
+          report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+      case "lint-js-aes-unwrap": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-js-aes-unwrap <file>`.");
+          return 1;
+        }
+        const report = lintJsAesUnwrapFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA js-aes-unwrap lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+
+      case "lint-js-wasm-hydrate-dump": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-js-wasm-hydrate-dump <file>`.");
+          return 1;
+        }
+        const report = lintJsWasmHydrateDumpFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA js-wasm-hydrate-dump lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+      case "lint-wasm-xor-mask-sidecar": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <file> path for `bla lint-wasm-xor-mask-sidecar <file>`.");
+          return 1;
+        }
+        const report = lintWasmXorMaskSidecarFile(resolve(target));
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA wasm-xor-mask-sidecar lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+
+
+      case "lint-wasm-seal-xor-known-plaintext": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <wasm> path for `bla lint-wasm-seal-xor-known-plaintext <wasm>`.");
+          return 1;
+        }
+        const sealArg = parsed.positionals[1];
+        const report = lintWasmSealXorKnownPlaintextFile(resolve(target), sealArg ? resolve(sealArg) : undefined);
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`BLA wasm-seal-xor-known-plaintext lint — ${report.path}`);
+          console.log(report.oneLineAdvice);
+          for (const f of report.findings) {
+            console.log(`  [${f.severity}] ${f.id}: ${f.summary}`);
+            if (f.evidence) console.log(`    evidence: ${f.evidence}`);
+          }
+          if (report.findings.length === 0) {
+            console.log("  (no findings)");
+          }
+        }
+        return report.shouldRefuseBankrupt || report.findings.some((f) => f.severity === "error")
+          ? 2
+          : 0;
+      }
+
+      case "audit": {
+        const loaded = loadBlaConfig(process.cwd(), parsed.configPath);
+        const target = parsed.positionals[0] ?? loaded.config.input;
+        if (!target) {
+          console.error("Error: Missing <target> path for `bla audit <target>`.");
+          return 1;
+        }
+        const report = auditTarget(target);
+        if (parsed.sarif) {
+          console.log(JSON.stringify(buildSarifReport(report), null, 2));
+        } else if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatAuditReport(report));
+        }
+        // CI gating parity with defend/verify: exposureScore is 0 (fully shielded)
+        // to 100 (completely exposed), so fail when it exceeds the threshold.
+        if (parsed.failUnder !== undefined && report.exposureScore > parsed.failUnder) {
+          return 2;
+        }
+        return 0;
+      }
+
+      case "protect": {
+        const loaded = loadBlaConfig(process.cwd(), parsed.configPath);
+        const target = parsed.positionals[0] ?? loaded.config.input;
+        if (!target) {
+          console.error("Error: Missing <target> path for `bla protect <target>`.");
+          return 1;
+        }
+        const resolved = resolveProjectSeed(process.cwd(), parsed.seed, parsed.configPath);
+        const res = protectTarget({
+          inputPath: target,
+          ...((parsed.output ?? loaded.config.output) !== undefined
+            ? { outputPath: (parsed.output ?? loaded.config.output)! }
+            : {}),
+          inPlace: parsed.inPlace,
+          intensity: argv.some((a) => a === "--intensity" || a.startsWith("--intensity="))
+            ? parsed.intensity
+            : (loaded.config.intensity ?? parsed.intensity),
+          seed: resolved.seed,
+          honeySourceMaps: parsed.honeyMaps && loaded.config.honeySourceMaps !== false,
+          llmDirectives: parsed.llmDirectives || loaded.config.llmDirectives === true,
+          weaveDecoys: parsed.weaveDecoys || loaded.config.weaveDecoys === true,
+          selfSeal: parsed.selfSeal || loaded.config.selfSeal === true,
+          ...(parsed.selfSealSiblingGlobs.length > 0
+            ? {
+                selfSealSiblingPaths: resolveSelfSealSiblingPaths({
+                  root: process.cwd(),
+                  globs: parsed.selfSealSiblingGlobs,
+                  targetPath: target,
+                  outputPath: parsed.output ?? loaded.config.output,
+                  inPlace: parsed.inPlace,
+                }),
+              }
+            : {}),
+          sidecarEntangle: parsed.sidecarEntangle || loaded.config.sidecarEntangle === true,
+          ...(parsed.sqliteEvalTrap || loaded.config.sqliteEvalTrap === true
+            ? { sqliteEvalTrap: true }
+            : {}),
+          ...mergeWasmPreserveExports(parsed, loaded.config),
+          allowLaneIndependentGates:
+            parsed.allowLaneIndependentGates ||
+            loaded.config.allowLaneIndependentGates === true,
+          allowPlaintextSeal:
+            parsed.allowPlaintextSeal ||
+            loaded.config.allowPlaintextSeal === true,
+          allowWasmClearParamCarriers:
+            parsed.allowWasmClearParamCarriers ||
+            loaded.config.allowWasmClearParamCarriers === true,
+          allowStablePanelDeriveAbi:
+            parsed.allowStablePanelDeriveAbi ||
+            loaded.config.allowStablePanelDeriveAbi === true,
+          allowJsAesUnwrap:
+            parsed.allowJsAesUnwrap ||
+            loaded.config.allowJsAesUnwrap === true,
+          allowPanelOfflineOracle:
+            parsed.allowPanelOfflineOracle ||
+            loaded.config.allowPanelOfflineOracle === true,
+          allowJsWasmHydrateDump:
+            parsed.allowJsWasmHydrateDump ||
+            loaded.config.allowJsWasmHydrateDump === true,
+          allowWasmXorMaskSidecar:
+            parsed.allowWasmXorMaskSidecar ||
+            loaded.config.allowWasmXorMaskSidecar === true,
+          allowWasmSealXorKnownPlaintext:
+            parsed.allowWasmSealXorKnownPlaintext ||
+            loaded.config.allowWasmSealXorKnownPlaintext === true,
+          allowReleaseHygieneLeak:
+            parsed.allowReleaseHygieneLeak ||
+            loaded.config.allowReleaseHygieneLeak === true,
+        });
+        registerBlaOutput(res.outputPath);
+        if (parsed.json) console.log(JSON.stringify(res, null, 2));
+        else console.log(formatProtectionResult(res));
+        return 0;
+      }
+
+      case "verify": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <target> path for `bla verify <target> [original]`.");
+          return 1;
+        }
+        const report = verifyTarget(target, parsed.positionals[1], {
+          autoDetectBindings: true,
+          ...(parsed.selfSeal ? { selfSealEnabled: true } : {}),
+          ...(parsed.sidecarEntangle ? { sidecarEntangleEnabled: true } : {}),
+        });
+        if (parsed.json) console.log(JSON.stringify(report, null, 2));
+        else console.log(formatVerificationReport(report));
+        if (parsed.failUnder !== undefined && report.defenseScore < parsed.failUnder) {
+          return 2;
+        }
+        return report.overallPassed ? 0 : 2;
+      }
+
+      case "benchmark": {
+        const bench = await runShowcaseBenchmark(
+          parsed.seed !== undefined ? { seed: parsed.seed } : {},
+        );
+        if (parsed.json) console.log(JSON.stringify(bench, null, 2));
+        else console.log(formatBenchmarkReport(bench));
+        return bench.cases.some((entry) => entry.functionalCheckPassed === false) ? 2 : 0;
+      }
+
+      case "emit-headers": {
+        const emitted = emitCompileTimeNativeHeader(parsed.lang, {
+          intensity: parsed.intensity,
+          ...(parsed.seed !== undefined ? { seed: parsed.seed } : {}),
+        });
+        if (parsed.output) {
+          const outPath = resolve(parsed.output);
+          writeFileAtomicSync(outPath, emitted.content, "utf8");
+          if (parsed.json) {
+            console.log(JSON.stringify({ ...emitted, outputPath: outPath }, null, 2));
+          } else {
+            console.log(`Emitted ${emitted.language.toUpperCase()} defense header to ${outPath} (${emitted.decoyFunctionsCount} decoy tarpit functions).`);
+          }
+        } else if (parsed.json) {
+          console.log(JSON.stringify(emitted, null, 2));
+        } else {
+          console.log(emitted.content);
+        }
+        return 0;
+      }
+
+      case "verify-manifest": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error("Error: Missing <manifest> path for `bla verify-manifest <manifest> [--public-key <pem>] [--require-pinned-key] [--artifact <path>]`.");
+          return 1;
+        }
+        const result = verifyManifestFile(target, parsed.publicKey, parsed.artifactPath, {
+          requirePinnedKey: parsed.requirePinnedKey,
+          requireArtifact: parsed.requireArtifact,
+        });
+        if (parsed.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(`${result.ok ? "VALID" : "INVALID"}: ${result.reason}`);
+        }
+        return result.ok ? 0 : 2;
+      }
+
+      case "verify-sidecar": {
+        const target = parsed.positionals[0];
+        if (!target) {
+          console.error(
+            "Error: Missing <entry> path for `bla verify-sidecar <entry> [--base-dir <dir>] [--json]`.",
+          );
+          return 1;
+        }
+        const result = verifySidecarTarget(target, parsed.baseDir);
+        if (parsed.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(
+            `${result.ok ? "VALID" : "INVALID"}: [${result.verifier}] ${result.reason}`,
+          );
+        }
+        return result.ok ? 0 : 2;
+      }
+
+      case "weave-plan": {
+        const target = parsed.positionals[0] ?? process.cwd();
+        const plan = buildWeavePlan(target);
+        console.log(JSON.stringify(plan, null, 2));
+        return plan.overallStatus === "unsupported" ? 2 : 0;
+      }
+
+      case "verify-weave": {
+        const target = parsed.positionals[0] ?? process.cwd();
+        const report = verifyWeaveTarget(target);
+        if (parsed.json) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(`${report.overallPassed ? "PASSED" : "FAILED"} (weaveScore: ${report.weaveScore}/100): ${report.summary}`);
+          for (const action of report.agentActions) {
+            console.log(`  - [${action.priority}] ${action.file} (${action.checkId}): ${action.instruction}`);
+          }
+        }
+        return report.overallPassed ? 0 : 2;
+      }
+
+      default:
+        console.error(`Unknown command: ${parsed.command}. Run "bla --help" for available commands.`);
+        return 1;
+    }
+  } catch (err) {
+    console.error(formatCliError(err));
+    return 1;
+  }
+}
+
+// Run when invoked directly
+const isDirectExecution =
+  process.argv[1] !== undefined &&
+  (process.argv[1].endsWith("cli.js") ||
+    process.argv[1].endsWith("cli.ts") ||
+    process.argv[1].endsWith("bla") ||
+    process.argv[1].endsWith("bla-agents") ||
+    process.argv[1].endsWith("bla-shield"));
+
+/**
+ * The stdio server owns the process lifetime once it starts, so a zero exit
+ * from the `mcp` path must not be written to `process.exitCode`. A non-zero
+ * code means the server never started (bad flags), and that must still surface.
+ */
+export function shouldSetProcessExitCode(argv: readonly string[], code: number): boolean {
+  const stdioServerPath = argv[2] === "mcp" || argv.includes("--mcp");
+  return !stdioServerPath || code !== 0;
+}
+
+if (isDirectExecution) {
+  runCli().then((code) => {
+    if (shouldSetProcessExitCode(process.argv, code)) {
+      process.exitCode = code;
+    }
+  });
+}

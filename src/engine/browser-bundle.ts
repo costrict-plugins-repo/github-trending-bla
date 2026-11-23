@@ -1,0 +1,175 @@
+/**
+ * Which JavaScript artifacts run in a browser rather than in Node?
+ *
+ * The self-seal and sidecar-entanglement bindings are Node programs: they read
+ * sibling files with `node:fs` and hash them with `node:crypto` when the entry
+ * module loads. Prepended to a front-end bundle they do not protect anything —
+ * `import … from "node:module"` makes the browser refuse the whole module, and
+ * a `require("node:crypto")` preamble throws "integrity binding mismatch" on
+ * an untouched build. So a browser bundle is hardened without them, and the
+ * report says so.
+ *
+ * Evidence, strongest first:
+ *  1. an HTML page loads the file (`<script src>`, `<link rel="modulepreload">`);
+ *  2. a file from (1) statically imports it (code-split chunks, workers);
+ *  3. it uses browser globals and shows no sign of Node at all.
+ *
+ * A wrong "browser" verdict only costs an optional integrity binding (and is
+ * reported); a wrong "Node" verdict ships an application that cannot start.
+ */
+
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+export interface BrowserBundleCandidate {
+  /** Absolute path of the JS/TS or HTML artifact as it sits in the project. */
+  readonly path: string;
+  readonly relativePath: string;
+  readonly format?: string;
+}
+
+const MAX_SCAN_BYTES = 8 * 1024 * 1024;
+const MAX_HTML_FILES = 64;
+
+const HTML_SCRIPT_REF_RE =
+  /<script\b[^>]*?\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))|<link\b[^>]*?\brel\s*=\s*["']?(?:modulepreload|preload|prefetch)["']?[^>]*?\bhref\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))|<link\b[^>]*?\bhref\s*=\s*(?:"([^"]+\.m?js(?:[?#][^"]*)?)"|'([^']+\.m?js(?:[?#][^']*)?)')[^>]*?\brel\s*=\s*["']?(?:modulepreload|preload|prefetch)/gi;
+
+/** Relative specifiers a module pulls in: static / dynamic imports and `new URL(…, import.meta.url)`. */
+const RELATIVE_IMPORT_RE =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|\bimportScripts\s*\(\s*|new\s+URL\s*\(\s*)["'`](\.{1,2}\/[^"'`\n]+?)["'`]/g;
+
+const BROWSER_GLOBAL_RE =
+  /(?:\btypeof\s+(?:window|document|navigator)\s*[!=]==?\s*["']undefined["']|(?<![.\w$])(?:document|window)\s*\.\s*[$A-Za-z_][\w$]*|\bcustomElements\s*\.\s*define|\b(?:localStorage|sessionStorage)\s*\.\s*(?:getItem|setItem)|\bnavigator\s*\.\s*(?:userAgent|serviceWorker|clipboard|language)|\brequestAnimationFrame\s*\(|\b(?:HTMLElement|ShadowRoot|MutationObserver|IntersectionObserver|ResizeObserver|DOMParser|XMLHttpRequest|indexedDB)\b|\bimportScripts\s*\(|(?<![.\w$])self\s*\.\s*(?:postMessage|onmessage|addEventListener)|\.(?:textContent|innerHTML|appendChild|classList|shadowRoot)\b)/;
+
+const NODE_MARKER_RE =
+  /\brequire\s*\(\s*["'`]|\bmodule\s*\.\s*exports\b|\b__dirname\b|\b__filename\b|\bprocess\s*\.\s*(?:env|argv|cwd|exit|platform|versions|stdout|stderr|stdin|on|nextTick|binding)\b|["'`]node:[a-z_/]+["'`]|\bfrom\s*["'`](?:fs|path|os|crypto|child_process|http|https|net|url|util|stream|worker_threads|electron)["'`]|\bimport\s*\.\s*meta\s*\.\s*(?:dirname|filename)\b|^#!.*\bnode\b/m;
+
+function readText(path: string): string | undefined {
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.size > MAX_SCAN_BYTES) return undefined;
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function stripQueryAndHash(ref: string): string {
+  const cut = ref.search(/[?#]/);
+  return cut === -1 ? ref : ref.slice(0, cut);
+}
+
+/**
+ * Map of absolute artifact path → why it is a browser bundle. Artifacts that
+ * run in Node (or cannot be told) are absent.
+ */
+export function classifyBrowserBundles(
+  candidates: readonly BrowserBundleCandidate[],
+  rootDirectory: string,
+): ReadonlyMap<string, string> {
+  const verdicts = new Map<string, string>();
+  if (candidates.length === 0) return verdicts;
+  const scripts = candidates.filter((candidate) => {
+    if (candidate.format !== "html-bundle" && !/\.html?$/i.test(candidate.path)) return true;
+    verdicts.set(resolve(candidate.path), "HTML bundle");
+    return false;
+  });
+  const byPath = new Map(scripts.map((c) => [resolve(c.path), c]));
+  const byBasename = new Map<string, BrowserBundleCandidate[]>();
+  for (const candidate of scripts) {
+    const key = basename(candidate.path);
+    byBasename.set(key, [...(byBasename.get(key) ?? []), candidate]);
+  }
+  const root = resolve(rootDirectory);
+
+  // 1. HTML pages beside the artifacts (their directory and the one above it).
+  const htmlDirs = new Set<string>();
+  for (const candidate of candidates) {
+    const dir = dirname(resolve(candidate.path));
+    htmlDirs.add(dir);
+    const parent = dirname(dir);
+    const fromRoot = relative(root, parent);
+    if (!isAbsolute(fromRoot) && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`)) htmlDirs.add(parent);
+  }
+  htmlDirs.add(root);
+  const htmlFiles = new Set(verdicts.keys());
+  for (const dir of htmlDirs) {
+    if (htmlFiles.size >= MAX_HTML_FILES) break;
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (/\.html?$/i.test(name)) htmlFiles.add(join(dir, name));
+      if (htmlFiles.size >= MAX_HTML_FILES) break;
+    }
+  }
+  const queue: string[] = [];
+  const mark = (path: string, reason: string): void => {
+    if (verdicts.has(path)) return;
+    verdicts.set(path, reason);
+    queue.push(path);
+  };
+  const markImports = (source: string, importer: string, reason: string): void => {
+    for (const match of source.matchAll(RELATIVE_IMPORT_RE)) {
+      const target = resolve(dirname(importer), stripQueryAndHash(match[1]!));
+      for (const path of [target, `${target}.js`, `${target}.mjs`]) {
+        if (byPath.has(path) && existsSync(path)) {
+          mark(path, reason);
+          break;
+        }
+      }
+    }
+  };
+  for (const htmlPath of htmlFiles) {
+    const html = readText(htmlPath);
+    if (html === undefined) continue;
+    const htmlDir = dirname(htmlPath);
+    for (const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)) {
+      const attrs = match[1]!;
+      if (/\bsrc\s*=/i.test(attrs) || !/\btype\s*=\s*(?:"module"|'module'|module(?=\s|$))/i.test(attrs)) continue;
+      markImports(match[2]!, htmlPath, `imported by an inline module in ${basename(htmlPath)}`);
+    }
+    for (const match of html.matchAll(HTML_SCRIPT_REF_RE)) {
+      const raw = match.slice(1).find((group) => group !== undefined);
+      if (raw === undefined) continue;
+      const ref = stripQueryAndHash(raw.trim());
+      if (ref.length === 0 || /^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(ref) || /^data:/i.test(ref)) {
+        continue;
+      }
+      // `/assets/app.js` is relative to the web root — taken to be the page's directory.
+      const resolved = resolve(htmlDir, ref.replace(/^\/+/, ""));
+      const reason = `loaded by ${basename(htmlPath)}`;
+      if (byPath.has(resolved)) {
+        mark(resolved, reason);
+        continue;
+      }
+      const sameName = byBasename.get(basename(ref));
+      if (sameName !== undefined && sameName.length === 1) {
+        mark(resolve(sameName[0]!.path), reason);
+      }
+    }
+  }
+
+  // 2. Everything a browser module imports is a browser module too.
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const source = readText(current);
+    if (source === undefined) continue;
+    markImports(source, current, `imported by ${basename(current)}, which a web page loads`);
+  }
+
+  // 3. Browser globals and nothing Node about it.
+  for (const candidate of scripts) {
+    const path = resolve(candidate.path);
+    if (verdicts.has(path)) continue;
+    const source = readText(path);
+    if (source === undefined) continue;
+    if (BROWSER_GLOBAL_RE.test(source) && !NODE_MARKER_RE.test(source)) {
+      verdicts.set(path, "uses browser globals (document / window / navigator) and no Node API");
+    }
+  }
+  return verdicts;
+}

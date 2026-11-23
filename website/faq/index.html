@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en" data-seo-page="faq">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://ungh.cc https://raw.githubusercontent.com; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <title>FAQ — AI Reverse-Engineering Defense, Performance &amp; Security Boundaries | BLA</title>
+    <meta
+      name="description"
+      content="Frequently asked questions about BLA (bla-agents): zero hot-path overhead, one-command MCP/CLI hardening, GGUF/Safetensors bit-exact tensor preservation, and honest client-side security boundaries."
+    />
+    <meta
+      name="keywords"
+      content="BLA FAQ, bla-agents performance, obfuscation overhead, GGUF tensor integrity, Android DEX checksum, software protection limits"
+    />
+    <meta name="author" content="BLA Contributors" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="theme-color" content="#040814" />
+    <link rel="canonical" href="https://bla.tools/faq/" />
+    <link rel="alternate" hreflang="en" href="https://bla.tools/faq/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://bla.tools/faq/?lang=zh-CN" />
+    <link rel="alternate" hreflang="zh-TW" href="https://bla.tools/faq/?lang=zh-TW" />
+    <link rel="alternate" hreflang="ja" href="https://bla.tools/faq/?lang=ja" />
+    <link rel="alternate" hreflang="ko" href="https://bla.tools/faq/?lang=ko" />
+    <link rel="alternate" hreflang="es" href="https://bla.tools/faq/?lang=es" />
+    <link rel="alternate" hreflang="fr" href="https://bla.tools/faq/?lang=fr" />
+    <link rel="alternate" hreflang="de" href="https://bla.tools/faq/?lang=de" />
+    <link rel="alternate" hreflang="x-default" href="https://bla.tools/faq/" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms.txt" title="BLA LLM Documentation" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms-full.txt" title="BLA Full Technical Reference" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="BLA (bla-agents)" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:locale:alternate" content="zh_TW" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta property="og:locale:alternate" content="ko_KR" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:url" content="https://bla.tools/faq/" />
+    <meta property="og:title" content="FAQ — BLA (bla-agents) AI Reverse-Engineering Defense" />
+    <meta
+      property="og:description"
+      content="Answers on runtime equivalence, performance overhead, GGUF/DEX binary integrity, one-step hardening, and BLA's Honesty Red Line."
+    />
+    <meta property="og:image" content="https://bla.tools/assets/social-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BLA Frequently Asked Questions" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FAQ — BLA (bla-agents) Blue Defense Shield" />
+    <meta
+      name="twitter:description"
+      content="Common questions on protecting binaries, Electron apps, JS/WASM, and AI models against automated AI reverse engineering."
+    />
+    <meta name="twitter:image" content="https://bla.tools/assets/social-card.png" />
+    <meta name="twitter:image:alt" content="BLA Frequently Asked Questions" />
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/logo.png" />
+    <link rel="manifest" href="../site.webmanifest" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Overview", "item": "https://bla.tools/" },
+              { "@type": "ListItem", "position": 2, "name": "FAQ", "item": "https://bla.tools/faq/" }
+            ]
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Why does BLA use a Blue theme?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "In security engineering, offensive and reverse-engineering tools represent Red Team workflows, while defensive protection tools represent Blue Team workflows. BLA (bla-agents) focuses on auditing exposure and protecting release artifacts against automated AI reverse-engineering agents."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does BLA affect runtime performance or change program output?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No. Static budget guards and call-graph labyrinths are placed behind O(1) mathematical invariants inside unreachable branches, and parameterized MBA substitutions preserve exact 32-bit semantics so hot-path output remains 100% equivalent."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "How do I run the full protection workflow in one step?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Run npx bla-agents@latest harden . from your terminal, or ask your connected coding agent (Claude Code, Cursor, Codex, Windsurf, Gemini CLI) to call the bla_harden MCP tool. It executes release exposure checks, packaging lints, protection, and verification."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does BLA preserve existing GGUF/Safetensors model tensors and Android DEX checksums?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. BLA preserves all original Safetensors and GGUF v2/v3 tensor slices bit-exact while appending aligned metadata, and Android DEX protection recomputes both the 20-byte SHA-1 signature and Adler32 checksum."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What are BLA's honest security limits?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "BLA raises automated reverse-engineering cost and plants multi-layer decoys; it is not a replacement for server-side authentication, authorization, or secret storage. Never embed real private keys or master secrets in client binaries."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <style>
+        @media (max-width: 1023px) {
+          .nav-toggle { display: none !important; }
+          .nav-panel {
+            display: flex !important;
+            position: static !important;
+            flex-direction: column;
+            background: transparent;
+            box-shadow: none;
+          }
+          .nav-bar { height: auto !important; min-height: 64px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+          .nav-links { flex-wrap: wrap; }
+        }
+      </style>
+    </noscript>
+    <header class="site-header">
+      <div class="container nav-bar">
+        <a href="../" class="brand">
+          <img src="../assets/logo.png" alt="BLA Shield Logo" class="brand-logo" width="38" height="38" decoding="async" />
+          <span>BLA</span>
+        </a>
+        <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav">
+          <span class="nav-toggle-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <div class="nav-panel" id="site-nav">
+        <nav class="nav-links" data-i18n-attr="aria-label:nav.primary">
+          <a href="../" class="nav-link" data-i18n="nav.overview">Overview</a>
+          <a href="../get-started/" class="nav-link" data-i18n="nav.getStarted">Get Started</a>
+          <a href="../showcase/" class="nav-link" data-i18n="nav.showcase">Benchmarks</a>
+          <a href="../crackme/" class="nav-link" data-i18n="nav.crackme">CrackMe</a>
+          <a href="../guides/" class="nav-link" data-i18n="nav.guides">Guides</a>
+          <a href="./" class="nav-link active" data-i18n="nav.faq">FAQ</a>
+          <a href="../enterprise/" class="nav-link" data-i18n="nav.enterprise">Enterprise</a>
+        </nav>
+        <div class="nav-actions">
+          <select id="bla-lang-select" class="lang-select" aria-label="Select Language" data-i18n-attr="aria-label:nav.lang">
+            <option value="en">🌐 English</option>
+            <option value="zh-CN">🌐 简体中文</option>
+            <option value="zh-TW">🌐 繁體中文</option>
+            <option value="ja">🌐 日本語</option>
+            <option value="ko">🌐 한국어</option>
+            <option value="es">🌐 Español</option>
+            <option value="fr">🌐 Français</option>
+            <option value="de">🌐 Deutsch</option>
+          </select>
+          <a href="https://github.com/qybaihe/bla" class="nav-cta" target="_blank" rel="noopener">
+            <span>★</span>
+            <span data-i18n="nav.star">Star</span>
+            <span class="star-pill" data-gh-stars data-state="loading">—</span>
+          </a>
+        </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <div class="eyebrow" data-i18n="faq.eyebrow">Frequently Asked Questions</div>
+            <h1 class="section-title" data-i18n="faq.title">Common Questions About BLA (`bla-agents`)</h1>
+          </div>
+
+          <div class="faq-list">
+            <details class="evidence-drawer" open>
+              <summary data-i18n="faq.q1">Why does BLA use a Blue theme?</summary>
+              <div class="drawer-body" data-i18n-html="faq.a1">
+                In security engineering, offensive and reverse-engineering tools are traditionally associated with Red Team workflows, while defensive protection tools represent Blue Team workflows. <strong>BLA</strong> (<code>bla-agents</code>) focuses on the defensive side: auditing exposure and protecting release artifacts.
+              </div>
+            </details>
+
+            <details class="evidence-drawer">
+              <summary data-i18n="faq.q2">Does BLA affect runtime performance or change program output?</summary>
+              <div class="drawer-body" data-i18n-html="faq.a2">
+                No. Static budget guards and call-graph state machines are placed behind O(1) bitwise invariants (such as <code>(Math.imul(x, x + 1) &amp; 1) === 0</code>) inside unreachable branches, so hot-path execution remains unchanged.
+              </div>
+            </details>
+
+            <details class="evidence-drawer">
+              <summary data-i18n="faq.q3">How do I run the full protection workflow in one step?</summary>
+              <div class="drawer-body" data-i18n-html="faq.a3">
+                Run <code>npx bla-agents@latest harden .</code> from your terminal, or ask your connected coding agent to call the <code>bla_harden</code> MCP tool. It executes release exposure checks, auditing, protection, and verification in sequence.
+              </div>
+            </details>
+
+            <details class="evidence-drawer">
+              <summary data-i18n="faq.q4">Does BLA preserve existing GGUF model tensors and binary checksums?</summary>
+              <div class="drawer-body" data-i18n-html="faq.a4">
+                Yes. <code>protectGgufBuffer</code> preserves all original GGUF v2/v3 KV entries and trailing tensor slices while appending metadata entries, and Android DEX protection recomputes both the 20-byte SHA-1 signature and Adler32 checksum.
+              </div>
+            </details>
+            <details class="evidence-drawer">
+              <summary data-i18n="faq.q5">What are BLA's honest limits?</summary>
+              <div class="drawer-body" data-i18n-html="faq.a5">
+                BLA raises analyzer cost and plants decoys; it is not a magic anti-RE seal. Traditional interactive reverse engineering (Ghidra, Frida, LLDB, JADX sessions) is out of scope of the commodity REA red-team numbers. The public challenge status is read from <a href="https://github.com/qybaihe/bla/tree/main/challenge">challenge/README.md</a>. This site does not publish a solve count.
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div data-i18n-html="footer.tagline"><strong>BLA (`bla-agents`)</strong> · Blind LLM Agents · Software Protection MCP &amp; CLI</div>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="../" data-i18n="nav.overview">Overview</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../get-started/" data-i18n="nav.getStarted">Get Started</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../showcase/" data-i18n="nav.showcase">Benchmarks</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../guides/" data-i18n="nav.guides">Guides</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../crackme/" data-i18n="nav.crackme">CrackMe</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../enterprise/" data-i18n="nav.enterprise">Enterprise</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../llms.txt">llms.txt</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="mailto:qybaihe@gmail.com">qybaihe@gmail.com</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="https://github.com/qybaihe/bla">GitHub ★</a>
+        </nav>
+        <p class="live-stamp" data-live-stamp="stars" data-state="loading"></p>
+      </div>
+    </footer>
+    <script src="../assets/i18n.js"></script>
+    <script type="module" src="../assets/main.js"></script>
+  </body>
+</html>

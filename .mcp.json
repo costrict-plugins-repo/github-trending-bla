@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bla": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "bla-agents@3.5.9",
+        "mcp"
+      ]
+    }
+  }
+}

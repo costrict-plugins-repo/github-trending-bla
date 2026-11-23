@@ -1,0 +1,622 @@
+/**
+ * Seed-derived string encryption pass for panel.html / license.cjs (Direction-2).
+ *
+ * Honesty constraints (competitor-research landing design + js-aes-unwrap-lint):
+ *   - Uses XOR keystream from SeededPrng.derive("string.encrypt") — NOT JS AES.
+ *   - Never introduces JS-held AES wrap-key + createDecipheriv (lint footgun).
+ *   - Runtime stub reconstructs the original UTF-8 string; equivalence is proven
+ *     by tests / CrackMe v8 fixture runs — not by claiming "unbreakable".
+ *
+ * MCP: bla_encrypt_strings.
+ */
+
+import { parse } from "@babel/parser";
+import _traverse from "@babel/traverse";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+} from "node:fs";
+import { basename, dirname, join, relative, resolve } from "node:path";
+import { SeededPrng } from "../core/prng.js";
+import { writeRawFileAtomicSync } from "./protector.js";
+import {
+  classifySensitiveLiteral,
+  lintPlaintextSecretsSource,
+} from "./plaintext-secret-lint.js";
+
+type UnwrapDefault<T> = T extends { readonly default: infer D } ? D : T;
+type TraverseFn = UnwrapDefault<typeof _traverse>;
+const traverse: TraverseFn =
+  typeof _traverse === "function"
+    ? (_traverse as unknown as TraverseFn)
+    : (_traverse as unknown as { readonly default: TraverseFn }).default;
+
+export const ENCRYPT_STRINGS_SCHEMA = "bla-encrypt-strings/v1" as const;
+
+export interface EncryptStringsOptions {
+  readonly path: string;
+  readonly seed: string;
+  readonly outDir?: string;
+  /** Also encrypt warning-class URL literals (default true). */
+  readonly includeUrls?: boolean;
+  readonly dryRun?: boolean;
+}
+
+export interface EncryptStringsFileResult {
+  readonly path: string;
+  readonly relativeName: string;
+  readonly encryptedCount: number;
+  readonly skippedCount: number;
+  readonly literals: readonly string[];
+  readonly written: boolean;
+  readonly outPath: string;
+}
+
+export interface EncryptStringsReport {
+  readonly schema: typeof ENCRYPT_STRINGS_SCHEMA;
+  readonly seedTag: string;
+  readonly files: readonly EncryptStringsFileResult[];
+  readonly totalEncrypted: number;
+  readonly postLintClean: boolean;
+  readonly honestyNote: string;
+  readonly status: "ok" | "noop" | "error";
+  readonly error?: string;
+}
+
+const TARGET_NAMES = new Set([
+  "panel.html",
+  "panel.htm",
+  "license.cjs",
+  "license.js",
+  "vault.cjs",
+  "gate.cjs",
+]);
+
+const SKIP_DIR_NAMES = new Set([
+  "node_modules",
+  ".git",
+  ".hg",
+  ".svn",
+  ".bla-hardened",
+  "coverage",
+  ".next",
+  ".turbo",
+  "vendor",
+  "__pycache__",
+]);
+
+const SCAN_EXT = /\.(?:html?|[cm]?js|tsx?|mts|cts)$/i;
+
+function walkEncryptTargets(root: string, depth: number, out: string[]): void {
+  if (depth > 6 || out.length >= 48) return;
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const ent of entries) {
+    if (out.length >= 48) break;
+    if (ent.name.startsWith(".") && ent.name !== ".fixture") continue;
+    const full = join(root, ent.name);
+    if (ent.isDirectory()) {
+      if (SKIP_DIR_NAMES.has(ent.name)) continue;
+      walkEncryptTargets(full, depth + 1, out);
+    } else if (ent.isFile() && SCAN_EXT.test(ent.name)) {
+      if (
+        /\.d\.ts$/i.test(ent.name) ||
+        /\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(ent.name) ||
+        /\.(?:min|shielded)\.[cm]?js$/i.test(ent.name)
+      ) {
+        continue;
+      }
+      out.push(full);
+    }
+  }
+}
+
+function listTargets(pathIn: string): string[] {
+  const abs = resolve(pathIn);
+  if (!existsSync(abs)) return [];
+  const st = statSync(abs);
+  if (st.isFile()) return [abs];
+  const out: string[] = [];
+  for (const name of TARGET_NAMES) {
+    const p = join(abs, name);
+    if (existsSync(p) && statSync(p).isFile()) out.push(p);
+  }
+  walkEncryptTargets(abs, 0, out);
+  return [...new Set(out)];
+}
+
+const HONESTY =
+  "XOR string hiding raises static grepping cost only. " +
+  "It is NOT white-box AES and does not claim resistance to runtime dump / REA. " +
+  "Run BEFORE --self-seal (mutating a sealed sibling invalidates integrity hashes). " +
+  "Prove equivalence with verify / CrackMe fixture / REA — never with collision luck.";
+
+function seedTag(seed: string): string {
+  return createHash("sha256")
+    .update(`string.encrypt|${seed}`)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+/** Deterministic keystream byte for index i under a string.encrypt PRNG. */
+export function keystreamByte(prng: SeededPrng, i: number): number {
+  const lane = new SeededPrng(
+    createHash("sha256")
+      .update(prng.seedString)
+      .update(`ks:${i >> 2}`)
+      .digest("hex"),
+  );
+  const word = lane.nextUint32();
+  return (word >>> ((i & 3) * 8)) & 0xff;
+}
+
+export function buildKeystream(prng: SeededPrng, length: number): Buffer {
+  const buf = Buffer.alloc(length);
+  for (let i = 0; i < length; i++) buf[i] = keystreamByte(prng, i);
+  return buf;
+}
+
+export function xorEncodeToBytes(plain: string, keystream: Buffer): number[] {
+  const buf = Buffer.from(plain, "utf8");
+  const out: number[] = new Array(buf.length);
+  for (let i = 0; i < buf.length; i++) {
+    out[i] = buf[i]! ^ keystream[i % keystream.length]!;
+  }
+  return out;
+}
+
+export function xorDecodeBytes(bytes: readonly number[], keystream: Buffer): string {
+  const out = Buffer.alloc(bytes.length);
+  for (let i = 0; i < bytes.length; i++) {
+    out[i] = (bytes[i]! ^ keystream[i % keystream.length]!) & 0xff;
+  }
+  return out.toString("utf8");
+}
+
+/**
+ * Derive a per-entry keystream slice from the master keystream so two table
+ * rows never share an identical byte-0 XOR pad (eliminating many-time-pad
+ * cross-row plaintext recovery when a benign SQL/URL row is known).
+ */
+export function deriveEntryKeystream(
+  keystream: Buffer,
+  entryIndex: number,
+  byteLength: number,
+): Buffer {
+  const len = Math.max(1, byteLength);
+  const out = Buffer.alloc(len);
+  const kLen = keystream.length;
+  for (let j = 0; j < len; j++) {
+    const kBase = keystream[(j + entryIndex * 31) % kLen]!;
+    const kSalt = keystream[(entryIndex * 7 + (j >> 2)) % kLen]!;
+    out[j] = (kBase ^ ((kSalt + entryIndex * 73 + j * 19) & 0xff)) & 0xff;
+  }
+  return out;
+}
+
+function encodeByteCsv(bytes: readonly number[]): string {
+  // Comma-separated decimals — avoids lane-independence "[n,n,n,n]" tables and
+  // plaintext-secret hex/base64/high-entropy string classifiers.
+  return bytes.join(",");
+}
+
+function buildRuntimeStub(
+  table: readonly (readonly number[])[],
+  keystream: Buffer,
+  fnName: string,
+  tableName: string,
+  ksName: string,
+): string {
+  const parse = 'split(",").map(Number)';
+  const tableLit =
+    "[" +
+    table.map((row) => JSON.stringify(encodeByteCsv(row)) + "." + parse).join(",") +
+    "]";
+  const ksLit = JSON.stringify(encodeByteCsv(Array.from(keystream))) + "." + parse;
+  return (
+    `var ${tableName}=${tableLit};` +
+    `var ${ksName}=${ksLit};` +
+    `function ${fnName}(i){` +
+    `var e=${tableName}[i],k=${ksName},kl=k.length,o=new Uint8Array(e.length);` +
+    `for(var j=0;j<e.length;j++){` +
+    `var kb=k[(j+i*31)%kl],ks=k[(i*7+(j>>2))%kl];` +
+    `o[j]=(e[j]^(kb^((ks+i*73+j*19)&255)))&255;` +
+    `}` +
+    `return typeof Buffer!=="undefined"?Buffer.from(o).toString("utf8"):` +
+    `(typeof TextDecoder!=="undefined"?new TextDecoder().decode(o):` +
+    `String.fromCharCode.apply(null,Array.from(o)));` +
+    `}` +
+    `var _blaS=${fnName};var _blaT=${tableName};`
+  );
+}
+
+function shouldEncrypt(lit: string, includeUrls: boolean): boolean {
+  const id = classifySensitiveLiteral(lit);
+  if (!id) return false;
+  if (id === "plaintext-url-endpoint" && !includeUrls) return false;
+  return true;
+}
+
+interface LiteralSpan {
+  readonly start: number;
+  readonly end: number;
+  readonly value: string;
+  readonly wrapJsxExpr?: boolean;
+}
+
+function isNonReplaceableStringPosition(path: {
+  readonly node: unknown;
+  readonly parent: unknown;
+  readonly parentPath?: { readonly node?: unknown; readonly parent: unknown; readonly parentPath?: unknown } | null;
+}): boolean {
+  const node = path.node as Record<string, unknown>;
+  const parent = path.parent as Record<string, unknown> | null | undefined;
+  if (!parent) return false;
+  const pType = parent.type;
+
+  // Ambient TypeScript declarations (`declare const`, `declare enum`, `declare module`, etc.)
+  let cur: { readonly node?: unknown; readonly parentPath?: unknown } | null | undefined = path;
+  while (cur) {
+    const curNode = cur.node as Record<string, unknown> | undefined;
+    if (curNode?.declare === true) return true;
+    cur = cur.parentPath as { readonly node?: unknown; readonly parentPath?: unknown } | null | undefined;
+  }
+
+  // Module specifiers in import / export declarations
+  if (
+    (pType === "ImportDeclaration" ||
+      pType === "ExportAllDeclaration" ||
+      pType === "ExportNamedDeclaration" ||
+      pType === "ImportExpression") &&
+    parent.source === node
+  ) {
+    return true;
+  }
+  if (
+    pType === "ImportSpecifier" || pType === "ExportSpecifier" ||
+    pType === "ExportNamespaceSpecifier" || pType === "ImportAttribute" ||
+    pType === "Directive"
+  ) {
+    return true;
+  }
+  // TypeScript literal types, enum member identifiers, or module references
+  if (
+    pType === "TSLiteralType" ||
+    pType === "TSExternalModuleReference" ||
+    pType === "TSImportType" ||
+    (pType === "TSEnumMember" && parent.id === node)
+  ) {
+    return true;
+  }
+  // Non-computed object / class keys or destructuring pattern keys
+  if (
+    (pType === "ObjectProperty" ||
+      pType === "ObjectMethod" ||
+      pType === "ClassProperty" ||
+      pType === "ClassMethod" ||
+      pType === "TSPropertySignature" ||
+      pType === "TSMethodSignature") &&
+    parent.key === node &&
+    parent.computed !== true
+  ) {
+    return true;
+  }
+  if (pType === "ObjectProperty" && path.parentPath?.parent) {
+    const grand = path.parentPath.parent as Record<string, unknown>;
+    if (grand.type === "ObjectPattern") return true;
+  }
+  // CommonJS require("...") or dynamic import("...")
+  if (pType === "CallExpression") {
+    const callee = parent.callee as Record<string, unknown> | undefined;
+    const args = parent.arguments as unknown[] | undefined;
+    if (
+      args?.[0] === node &&
+      (callee?.type === "Import" ||
+        (callee?.type === "Identifier" && callee.name === "require"))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function collectJsLiteralSpans(source: string): {
+  spans: LiteralSpan[];
+  prologueEnd: number;
+} {
+  try {
+    const ast = parse(source, {
+      sourceType: "unambiguous",
+      allowReturnOutsideFunction: true,
+      allowImportExportEverywhere: true,
+      allowSuperOutsideMethod: true,
+      plugins: ["typescript", "jsx", "decorators-legacy"],
+    });
+    const spans: LiteralSpan[] = [];
+    traverse(ast, {
+      StringLiteral(path) {
+        if (isNonReplaceableStringPosition(path)) return;
+        const { start, end, value } = path.node;
+        if (typeof start === "number" && typeof end === "number") {
+          const wrapJsxExpr =
+            path.parent.type === "JSXAttribute" && path.parent.value === path.node;
+          spans.push({
+            start,
+            end,
+            value,
+            ...(wrapJsxExpr ? { wrapJsxExpr: true } : {}),
+          });
+        }
+      },
+      TemplateLiteral(path) {
+        if (
+          path.parent.type === "TaggedTemplateExpression" ||
+          path.node.expressions.length > 0 ||
+          path.node.quasis.length !== 1 ||
+          isNonReplaceableStringPosition(path)
+        ) {
+          return;
+        }
+        const quasi = path.node.quasis[0];
+        const { start, end } = path.node;
+        const value = quasi?.value.cooked ?? quasi?.value.raw ?? "";
+        if (typeof start === "number" && typeof end === "number") {
+          spans.push({ start, end, value });
+        }
+      },
+    });
+    spans.sort((a, b) => a.start - b.start);
+    const prologueEnd = ast.program.directives.at(-1)?.end ?? ast.program.interpreter?.end ?? 0;
+    return { spans, prologueEnd };
+  } catch {
+    // Without a parse, string positions and directive boundaries cannot be
+    // determined safely. The original still goes through the post-lint.
+    return { spans: [], prologueEnd: 0 };
+  }
+}
+
+function transformJsSource(
+  source: string,
+  prng: SeededPrng,
+  includeUrls: boolean,
+): {
+  readonly code: string;
+  readonly encrypted: string[];
+  readonly skipped: number;
+} {
+  // Never re-encrypt a file that already carries the _blaS decrypt stub
+  if (source.includes("var _blaS=") && source.includes("var _blaT=")) {
+    return { code: source, encrypted: [], skipped: 0 };
+  }
+
+  const { spans, prologueEnd } = collectJsLiteralSpans(source);
+  const replaceable: LiteralSpan[] = [];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+  for (const span of spans) {
+    if (!shouldEncrypt(span.value, includeUrls)) {
+      skipped += 1;
+      continue;
+    }
+    replaceable.push(span);
+    if (!seen.has(span.value)) {
+      seen.add(span.value);
+      unique.push(span.value);
+    }
+  }
+  if (unique.length === 0 || replaceable.length === 0) {
+    return { code: source, encrypted: [], skipped };
+  }
+
+  const maxLen = Math.max(
+    ...unique.map((u) => Buffer.byteLength(u, "utf8")),
+    32,
+  );
+  const keystream = buildKeystream(prng, Math.max(64, maxLen));
+  const table = unique.map((u, idx) =>
+    xorEncodeToBytes(
+      u,
+      deriveEntryKeystream(keystream, idx, Buffer.byteLength(u, "utf8")),
+    ),
+  );
+  const fnName = prng.identifier({ style: "camel", hint: "resolveBundleSlot", entropy: 3 });
+  const tableName = prng.identifier({ style: "camel", hint: "catalogFrameTable", entropy: 3 });
+  const ksName = prng.identifier({ style: "camel", hint: "sessionKeyMask", entropy: 3 });
+  const stub = buildRuntimeStub(table, keystream, fnName, tableName, ksName);
+
+  const indexByLiteral = new Map<string, number>();
+  unique.forEach((lit, i) => {
+    indexByLiteral.set(lit, i);
+  });
+
+  // Splice AST spans in reverse order so earlier offsets stay valid.
+  let body = source;
+  const descending = [...replaceable].sort((a, b) => b.start - a.start);
+  for (const span of descending) {
+    const idx = indexByLiteral.get(span.value);
+    if (idx === undefined) continue;
+    const callExpr = span.wrapJsxExpr ? `{${fnName}(${idx})}` : `(${fnName}(${idx}))`;
+    body = `${body.slice(0, span.start)}${callExpr}${body.slice(span.end)}`;
+  }
+
+  // Keep all directives and the shebang before the helper. The newline
+  // terminates even a directive with no explicit semicolon.
+  return {
+    code: `${body.slice(0, prologueEnd)}\n${stub}\n${body.slice(prologueEnd)}`,
+    encrypted: unique,
+    skipped,
+  };
+}
+
+function transformHtml(
+  source: string,
+  prng: SeededPrng,
+  includeUrls: boolean,
+): {
+  readonly code: string;
+  readonly encrypted: string[];
+  readonly skipped: number;
+} {
+  const scriptRe = /(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi;
+  const allEncrypted: string[] = [];
+  let skipped = 0;
+  let any = false;
+  let scriptIndex = 0;
+  const code = source.replace(scriptRe, (_m, open, body, close) => {
+    const openStr = String(open);
+    if (/\bsrc\s*=/.test(openStr) && String(body).trim().length === 0) {
+      return `${open}${body}${close}`;
+    }
+    const typeMatch = openStr.match(/\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const rawType = (typeMatch?.[1] ?? typeMatch?.[2] ?? typeMatch?.[3] ?? "")
+      .trim()
+      .toLowerCase();
+    if (
+      rawType.length > 0 &&
+      rawType !== "module" &&
+      rawType !== "text/javascript" &&
+      rawType !== "application/javascript" &&
+      rawType !== "text/ecmascript" &&
+      rawType !== "application/ecmascript"
+    ) {
+      return `${open}${body}${close}`;
+    }
+    const currentScriptIdx = scriptIndex++;
+    const result = transformJsSource(
+      body,
+      prng.derive(`html:${currentScriptIdx}`),
+      includeUrls,
+    );
+    skipped += result.skipped;
+    if (result.encrypted.length > 0) {
+      any = true;
+      allEncrypted.push(...result.encrypted);
+      return `${open}${result.code}${close}`;
+    }
+    return `${open}${body}${close}`;
+  });
+  if (!any) return { code: source, encrypted: [], skipped };
+  return { code, encrypted: allEncrypted, skipped };
+}
+
+export function encryptStrings(options: EncryptStringsOptions): EncryptStringsReport {
+  try {
+    if (typeof options.seed !== "string" || options.seed.length === 0) {
+      return {
+        schema: ENCRYPT_STRINGS_SCHEMA,
+        seedTag: "",
+        files: [],
+        totalEncrypted: 0,
+        postLintClean: false,
+        honestyNote: HONESTY,
+        status: "error",
+        error: "seed is required for reproducible string encryption",
+      };
+    }
+    const targets = listTargets(options.path);
+    if (targets.length === 0) {
+      return {
+        schema: ENCRYPT_STRINGS_SCHEMA,
+        seedTag: seedTag(options.seed),
+        files: [],
+        totalEncrypted: 0,
+        postLintClean: true,
+        honestyNote: HONESTY,
+        status: "noop",
+        error: `no panel.html / license.cjs under ${options.path}`,
+      };
+    }
+
+    const absPath = resolve(options.path);
+    const isSingleFileInput = existsSync(absPath) && statSync(absPath).isFile();
+    const baseRoot = isSingleFileInput ? dirname(absPath) : absPath;
+    const rootPrng = new SeededPrng(options.seed).derive("string.encrypt");
+    const includeUrls = options.includeUrls !== false;
+    const outDir = options.outDir ? resolve(options.outDir) : null;
+    if (outDir && !options.dryRun) mkdirSync(outDir, { recursive: true });
+
+    const files: EncryptStringsFileResult[] = [];
+    let postLintClean = true;
+    let totalEncrypted = 0;
+
+    for (const file of targets) {
+      const source = readFileSync(file, "utf8");
+      const isHtml = /\.html?$/i.test(file);
+      const relFromRoot = isSingleFileInput
+        ? basename(file)
+        : relative(baseRoot, file) || basename(file);
+      const normalizedRel = relFromRoot.replace(/\\/g, "/");
+      const filePrng = rootPrng.derive(normalizedRel);
+      const result = isHtml
+        ? transformHtml(source, filePrng, includeUrls)
+        : transformJsSource(source, filePrng, includeUrls);
+
+      const outPath = outDir ? join(outDir, relFromRoot) : file;
+      const lint = lintPlaintextSecretsSource(result.code, { path: outPath });
+      if (lint.shouldRefuseBankrupt) postLintClean = false;
+      let written = false;
+      if (result.encrypted.length > 0 && !options.dryRun) {
+        if (outDir) mkdirSync(dirname(outPath), { recursive: true });
+        // Same atomic, link-guarded writer the rest of the engine uses: an
+        // outDir copy must not follow a planted symlink/hardlink, while the
+        // in-place rewrite of the caller's own file keeps that opt-in.
+        writeRawFileAtomicSync(outPath, result.code, "utf8", {
+          allowLinkWriteThrough: outDir === null,
+        });
+        written = true;
+      }
+
+      if (
+        result.encrypted.length === 0 &&
+        !isSingleFileInput &&
+        !TARGET_NAMES.has(basename(file).toLowerCase()) &&
+        targets.length > 1
+      ) {
+        continue;
+      }
+
+      totalEncrypted += result.encrypted.length;
+      files.push({
+        path: file,
+        relativeName: normalizedRel,
+        encryptedCount: result.encrypted.length,
+        skippedCount: result.skipped,
+        literals: result.encrypted.map((s) =>
+          s.length > 80 ? `${s.slice(0, 80)}…` : s,
+        ),
+        written,
+        outPath,
+      });
+    }
+
+    return {
+      schema: ENCRYPT_STRINGS_SCHEMA,
+      seedTag: seedTag(options.seed),
+      files,
+      totalEncrypted,
+      postLintClean,
+      honestyNote: HONESTY,
+      status: totalEncrypted === 0 ? "noop" : "ok",
+    };
+  } catch (err) {
+    return {
+      schema: ENCRYPT_STRINGS_SCHEMA,
+      seedTag: "",
+      files: [],
+      totalEncrypted: 0,
+      postLintClean: false,
+      honestyNote: HONESTY,
+      status: "error",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

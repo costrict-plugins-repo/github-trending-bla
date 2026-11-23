@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en" data-seo-page="showcase">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com https://ungh.cc https://raw.githubusercontent.com; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <title>Counter-REA Benchmarks — 14-Target Defense &amp; Token Amplification Suite | BLA</title>
+    <meta
+      name="description"
+      content="Reproducible 14-target Counter-REA benchmark results for BLA (bla-agents): ~1,000x+ token amplification and 100% runtime equivalence across Electron ASAR, JS, WASM, ELF64, SQLite, Safetensors, and DEX."
+    />
+    <meta
+      name="keywords"
+      content="AI reverse engineering benchmark, Counter-REA benchmark, obfuscation benchmark, Electron ASAR protection benchmark, WASM protection, Safetensors GGUF protection, LLM token exhaustion"
+    />
+    <meta name="author" content="BLA Contributors" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="theme-color" content="#040814" />
+    <link rel="canonical" href="https://bla.tools/showcase/" />
+    <link rel="alternate" hreflang="en" href="https://bla.tools/showcase/" />
+    <link rel="alternate" hreflang="zh-CN" href="https://bla.tools/showcase/?lang=zh-CN" />
+    <link rel="alternate" hreflang="zh-TW" href="https://bla.tools/showcase/?lang=zh-TW" />
+    <link rel="alternate" hreflang="ja" href="https://bla.tools/showcase/?lang=ja" />
+    <link rel="alternate" hreflang="ko" href="https://bla.tools/showcase/?lang=ko" />
+    <link rel="alternate" hreflang="es" href="https://bla.tools/showcase/?lang=es" />
+    <link rel="alternate" hreflang="fr" href="https://bla.tools/showcase/?lang=fr" />
+    <link rel="alternate" hreflang="de" href="https://bla.tools/showcase/?lang=de" />
+    <link rel="alternate" hreflang="x-default" href="https://bla.tools/showcase/" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms.txt" title="BLA LLM Documentation" />
+    <link rel="alternate" type="text/plain" href="https://bla.tools/llms-full.txt" title="BLA Full Technical Reference" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="BLA (bla-agents)" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:locale:alternate" content="zh_CN" />
+    <meta property="og:locale:alternate" content="zh_TW" />
+    <meta property="og:locale:alternate" content="ja_JP" />
+    <meta property="og:locale:alternate" content="ko_KR" />
+    <meta property="og:locale:alternate" content="es_ES" />
+    <meta property="og:locale:alternate" content="fr_FR" />
+    <meta property="og:locale:alternate" content="de_DE" />
+    <meta property="og:url" content="https://bla.tools/showcase/" />
+    <meta property="og:title" content="Counter-REA Benchmarks — 14-Target Defense Suite | BLA (bla-agents)" />
+    <meta
+      property="og:description"
+      content="Inspect reproducible before/after exposure scores, LLM token cost amplification, and 100% runtime equivalence checks across 14 software formats."
+    />
+    <meta property="og:image" content="https://bla.tools/assets/social-card.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="BLA vs REA 14-Target Showcase Benchmark Suite" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="BLA vs. REA — 14-Target Counter-Showcase Benchmarks" />
+    <meta
+      name="twitter:description"
+      content="Reproducible token amplification and runtime equivalence benchmarks across 14 binary, bytecode, web, database, and AI model targets."
+    />
+    <meta name="twitter:image" content="https://bla.tools/assets/social-card.png" />
+    <meta name="twitter:image:alt" content="BLA vs REA 14-Target Showcase Benchmark Suite" />
+    <link rel="icon" type="image/svg+xml" href="../assets/favicon.svg" />
+    <link rel="icon" type="image/png" href="../assets/favicon.png" />
+    <link rel="apple-touch-icon" href="../assets/logo.png" />
+    <link rel="manifest" href="../site.webmanifest" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Overview", "item": "https://bla.tools/" },
+              { "@type": "ListItem", "position": 2, "name": "Benchmarks", "item": "https://bla.tools/showcase/" }
+            ]
+          },
+          {
+            "@type": "TechArticle",
+            "headline": "BLA vs. REA — 14-Target Counter-Showcase Benchmark Suite",
+            "url": "https://bla.tools/showcase/",
+            "mainEntityOfPage": "https://bla.tools/showcase/",
+            "image": "https://bla.tools/assets/social-card.png",
+            "datePublished": "2026-10-25",
+            "dateModified": "2026-11-16",
+            "author": { "@type": "Organization", "name": "BLA (Blind LLM Agents)", "url": "https://bla.tools/" },
+            "publisher": { "@type": "Organization", "name": "BLA (Blind LLM Agents)", "url": "https://bla.tools/" },
+            "description": "Deterministic benchmark measuring AI reverse-engineering token amplification, cost multiplication, and 100% runtime equivalence across 14 artifact formats."
+          },
+          {
+            "@type": "ItemList",
+            "name": "BLA Counter-REA Benchmark Targets",
+            "itemListElement": [
+              { "@type": "ListItem", "position": 1, "name": "Electron .asar Desktop Application (41.3x token amplification)" },
+              { "@type": "ListItem", "position": 2, "name": "JavaScript / TypeScript Bundle (49.2x token amplification)" },
+              { "@type": "ListItem", "position": 3, "name": "Native ELF64 / Mach-O / PE Binaries" },
+              { "@type": "ListItem", "position": 4, "name": "SQLite, Safetensors & GGUF AI Model Vaults (38.6x token amplification)" },
+              { "@type": "ListItem", "position": 5, "name": "WebAssembly (.wasm) & Python (.py / .pyc) Modules (36.4x token amplification)" },
+              { "@type": "ListItem", "position": 6, "name": "Android DEX / APK, Unity IL2CPP, Erlang BEAM & EVM Bytecode (34.8x token amplification)" }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <noscript>
+      <style>
+        @media (max-width: 1023px) {
+          .nav-toggle { display: none !important; }
+          .nav-panel {
+            display: flex !important;
+            position: static !important;
+            flex-direction: column;
+            background: transparent;
+            box-shadow: none;
+          }
+          .nav-bar { height: auto !important; min-height: 64px; flex-wrap: wrap; padding-top: 12px; padding-bottom: 12px; }
+          .nav-links { flex-wrap: wrap; }
+        }
+      </style>
+    </noscript>
+    <header class="site-header">
+      <div class="container nav-bar">
+        <a href="../" class="brand">
+          <img src="../assets/logo.png" alt="BLA Shield Logo" class="brand-logo" width="38" height="38" decoding="async" />
+          <span>BLA</span>
+        </a>
+        <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav">
+          <span class="nav-toggle-icon" aria-hidden="true"></span>
+          <span class="visually-hidden">Menu</span>
+        </button>
+        <div class="nav-panel" id="site-nav">
+        <nav class="nav-links" data-i18n-attr="aria-label:nav.primary">
+          <a href="../" class="nav-link" data-i18n="nav.overview">Overview</a>
+          <a href="../get-started/" class="nav-link" data-i18n="nav.getStarted">Get Started</a>
+          <a href="./" class="nav-link active" data-i18n="nav.showcase">Benchmarks</a>
+          <a href="../crackme/" class="nav-link" data-i18n="nav.crackme">CrackMe</a>
+          <a href="../guides/" class="nav-link" data-i18n="nav.guides">Guides</a>
+          <a href="../faq/" class="nav-link" data-i18n="nav.faq">FAQ</a>
+          <a href="../enterprise/" class="nav-link" data-i18n="nav.enterprise">Enterprise</a>
+        </nav>
+        <div class="nav-actions">
+          <select id="bla-lang-select" class="lang-select" aria-label="Select Language" data-i18n-attr="aria-label:nav.lang">
+            <option value="en">🌐 English</option>
+            <option value="zh-CN">🌐 简体中文</option>
+            <option value="zh-TW">🌐 繁體中文</option>
+            <option value="ja">🌐 日本語</option>
+            <option value="ko">🌐 한국어</option>
+            <option value="es">🌐 Español</option>
+            <option value="fr">🌐 Français</option>
+            <option value="de">🌐 Deutsch</option>
+          </select>
+          <a href="https://github.com/qybaihe/bla" class="nav-cta" target="_blank" rel="noopener">
+            <span>★</span>
+            <span data-i18n="nav.star">Star</span>
+            <span class="star-pill" data-gh-stars data-state="loading">—</span>
+          </a>
+        </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <div class="container">
+          <div class="section-header">
+            <div class="eyebrow" data-i18n="sc.eyebrow">14-Target Benchmark Suite</div>
+            <h1 class="section-title" data-i18n="sc.title">Unprotected Baseline vs. BLA Protected Output</h1>
+            <p class="section-lead" data-i18n-html="sc.lead">
+              Run all 14 benchmark targets locally with <code>npx bla-agents@latest benchmark</code>.
+            </p>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <span class="card-tag">Target 01 · Electron .asar</span>
+              <h3>Notion Desktop Clipboard Bridge</h3>
+              <p>
+                <strong>Baseline:</strong> Analyzed in 38s ($0.20).<br />
+                <strong>Protected:</strong> IPC de-literalized + 22 obligation families + shadow logic → <strong>41.3x token ratio ($14.88)</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• ipcChannelsPairedUniquely: 0
+• triggeredLimits: ["alias-selections", "primitive-candidates", "primitive-bytes", "getter-expansion"]
+• runtimeEquivalence: 100% Exact</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">Target 02 · JavaScript Audio/Physics</span>
+              <h3>DX-Ball Stereo Sound-Pan Engine</h3>
+              <p>
+                <strong>Baseline:</strong> Analyzed in 22s ($0.13).<br />
+                <strong>Protected:</strong> 9-chunk opaque ternaries + 40-node SCC mesh → <strong>49.2x token ratio ($11.45)</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• primitiveCandidateBranches: 512 (> 256 limit)
+• sccLabyrinthEdges: 160
+• runtimeEquivalence: calculateSoundPan(160, 640) === -0.5</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">Target 03 · Native ELF64 / Mach-O / PE</span>
+              <h3>Enterprise License &amp; Fuse Daemon</h3>
+              <p>
+                <strong>Baseline:</strong> Crates &amp; fuses extracted in 45s.<br />
+                <strong>Protected:</strong> 72 rustc hashes (&gt;64 limit) + 33 fuse sentinels (&gt;32 limit) → <strong>Parser Limit Reached</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• RustBinaryProvider: exceeds MAX_RUSTC_HASHES (64)
+• ElectronFuseReader: exceeds maximumSentinelsPerSlice (32)
+• Native exports preserved: 100%</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">Target 04 · SQLite &amp; AI Models</span>
+              <h3>.sqlite, .safetensors &amp; .gguf Vaults</h3>
+              <p>
+                <strong>Baseline:</strong> Schema &amp; tensor headers parsed in 19s.<br />
+                <strong>Protected:</strong> Virtual generated-column guard + 35-level metadata nesting → <strong>38.6x token ratio</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• SQLite (--sqlite-eval-trap): SqliteColumnEvaluationFailure on read-only connection
+• Safetensors/GGUF: ModelFormatFailure("capacity", >32 levels)
+• Existing GGUF KV &amp; tensors preserved: 100%</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">Target 05 · WebAssembly &amp; Python</span>
+              <h3>.wasm Linear Memory &amp; .py / .pyc Modules</h3>
+              <p>
+                <strong>Baseline:</strong> Exports &amp; marshal constants extracted in 26s.<br />
+                <strong>Protected:</strong> WABT interface exhaustion + sidecar digest entanglement → <strong>36.4x token ratio</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• WasmInterfaceExhaustion: custom section + import/export descriptors expanded
+• PythonSidecarEntangle: strip or tamper fails closed at startup
+• Runtime output equivalence: 100% Exact</div>
+              </details>
+            </div>
+
+            <div class="card">
+              <span class="card-tag">Target 06 · Mobile, Bytecode &amp; Firmware</span>
+              <h3>Android DEX / APK, Unity IL2CPP, BEAM &amp; EVM</h3>
+              <p>
+                <strong>Baseline:</strong> Class descriptors &amp; metadata tables indexed in 31s.<br />
+                <strong>Protected:</strong> Recomputed SHA-1/Adler32 DEX + IFF/UF2 decoy chunks → <strong>34.8x token ratio</strong>.
+              </p>
+              <details class="evidence-drawer">
+                <summary>View Verification Output</summary>
+                <div class="drawer-body">• AndroidDex: SHA-1 signature + Adler32 checksum verified
+• Il2CppMetadata: decoy string &amp; type descriptors injected
+• Erlang BEAM / PCAP / PTX / UF2: container integrity 100% preserved</div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div data-i18n-html="footer.tagline"><strong>BLA (`bla-agents`)</strong> · Blind LLM Agents · Software Protection MCP &amp; CLI</div>
+        <nav class="footer-nav" aria-label="Footer">
+          <a href="../" data-i18n="nav.overview">Overview</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../get-started/" data-i18n="nav.getStarted">Get Started</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../guides/" data-i18n="nav.guides">Guides</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../crackme/" data-i18n="nav.crackme">CrackMe</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../faq/" data-i18n="nav.faq">FAQ</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../enterprise/" data-i18n="nav.enterprise">Enterprise</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="../llms.txt">llms.txt</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="mailto:qybaihe@gmail.com">qybaihe@gmail.com</a>
+          <span class="footer-sep" aria-hidden="true">·</span>
+          <a href="https://github.com/qybaihe/bla">GitHub ★</a>
+        </nav>
+        <p class="live-stamp" data-live-stamp="stars" data-state="loading"></p>
+      </div>
+    </footer>
+    <script src="../assets/i18n.js"></script>
+    <script type="module" src="../assets/main.js"></script>
+  </body>
+</html>
